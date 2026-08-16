@@ -37,8 +37,8 @@ PACKAGE_ID=""
 SEQUENCE=""
 
 # Endorser arguments reused by commit and invoke.
-ENDORSER_ARGS=()
-one_peer_per_org_args ENDORSER_ARGS
+collect_args one_peer_per_org_args
+ENDORSER_ARGS=("${COLLECTED_ARGS[@]}")
 
 # ---------------------------------------------------------------------------
 step_vendor() {
@@ -73,10 +73,12 @@ step_package() {
 
   ok "${CHAINCODE_NAME}.tar.gz ($(du -h "${PACKAGE}" | cut -f1 | tr -d ' ')), label ${LABEL}"
 
-  # The CouchDB indexes must be inside the package, otherwise rich queries run
-  # without an index. They sit next to code.tar.gz at the root of the outer archive.
+  # The CouchDB indexes must be inside the package, otherwise rich queries would
+  # silently fall back to unindexed scans. The package is a tar holding
+  # metadata.json plus a nested code.tar.gz, and META-INF lives inside that inner
+  # archive, so listing the outer one is not enough.
   local index_count
-  index_count=$(tar -tzf "${PACKAGE}" 2>/dev/null \
+  index_count=$(tar -xzOf "${PACKAGE}" code.tar.gz 2>/dev/null | tar -tz 2>/dev/null \
     | grep -c 'META-INF/statedb/couchdb/indexes/.*\.json' || true)
   if [ "${index_count}" -gt 0 ]; then
     ok "${index_count} CouchDB indexes are in the package"
@@ -89,14 +91,22 @@ step_package() {
 step_install() {
   header "3/6  Installing on all 9 peers"
 
+  # The package ID is a hash of the package contents, so it is computed from the
+  # file before installing. Skipping an install based on the label would be wrong:
+  # the label stays trade_1.0 while the code changes, so a rebuilt package would
+  # never be installed and the peers would keep running the previous version.
+  PACKAGE_ID=$(peer lifecycle chaincode calculatepackageid "${PACKAGE}" 2>/dev/null)
+  [ -n "${PACKAGE_ID}" ] || fatal "could not compute the package ID for ${PACKAGE}"
+  ok "package ID: ${PACKAGE_ID}"
+
   local org p output
   for org in 1 2 3; do
     for p in 0 1 2; do
       set_peer "${org}" "${p}"
 
       if peer lifecycle chaincode queryinstalled --output json 2>/dev/null \
-         | jq -e --arg label "${LABEL}" \
-             '.installed_chaincodes // [] | any(.label == $label)' >/dev/null; then
+         | jq -e --arg id "${PACKAGE_ID}" \
+             '.installed_chaincodes // [] | any(.package_id == $id)' >/dev/null; then
         detail "peer${p}.org${org}: already installed"
         continue
       fi
@@ -109,14 +119,6 @@ step_install() {
       detail "peer${p}.org${org}: installed"
     done
   done
-
-  # The package ID is a hash of the package and is identical on every peer.
-  set_peer 1 0
-  PACKAGE_ID=$(peer lifecycle chaincode queryinstalled --output json \
-    | jq -r --arg label "${LABEL}" \
-        '.installed_chaincodes[] | select(.label == $label) | .package_id')
-  [ -n "${PACKAGE_ID}" ] || fatal "no package ID found for label ${LABEL}"
-  ok "package ID: ${PACKAGE_ID}"
 }
 
 # ---------------------------------------------------------------------------

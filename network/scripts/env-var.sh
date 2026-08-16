@@ -53,38 +53,47 @@ set_peer() {
 }
 
 # ---------------------------------------------------------------------------
-# all_peer_args <array_name>
+# Endorser arguments.
 #
-# Fills the named array with --peerAddresses/--tlsRootCertFiles pairs for all nine
-# peers. An array is used rather than a string because the values contain paths
-# that must not go through word splitting twice.
+# These print one argument per line, and the caller collects them into an array:
+#
+#   args=(); while IFS= read -r line; do args+=("$line"); done < <(one_peer_per_org_args)
+#   peer chaincode invoke ... "${args[@]}"
+#
+# One line per argument rather than one space separated string, because the
+# certificate paths must not go through word splitting. A bash nameref would be
+# tidier but requires bash 4.3, and macOS still ships bash 3.2.
 # ---------------------------------------------------------------------------
+
+# all_peer_args prints the --peerAddresses/--tlsRootCertFiles pairs for all nine peers.
 all_peer_args() {
-  local -n target=$1
-  target=()
   local org p
   for org in 1 2 3; do
     for p in 0 1 2; do
-      target+=(--peerAddresses "localhost:$(peer_port "${org}" "${p}")"
-               --tlsRootCertFiles "$(peer_tls_root "${org}" "${p}")")
+      printf '%s\n' --peerAddresses "localhost:$(peer_port "${org}" "${p}")" \
+                    --tlsRootCertFiles "$(peer_tls_root "${org}" "${p}")"
     done
   done
 }
 
-# ---------------------------------------------------------------------------
-# one_peer_per_org_args <array_name>
-#
-# Smallest set of endorsers that satisfies OutOf(2, ...): peer0 from each
-# organization. Faster than all nine and still enough for the policy.
-# ---------------------------------------------------------------------------
+# one_peer_per_org_args prints the smallest set of endorsers that satisfies
+# OutOf(2, ...): peer0 from each organization. Faster than all nine and still
+# enough for the policy.
 one_peer_per_org_args() {
-  local -n target=$1
-  target=()
   local org
   for org in 1 2 3; do
-    target+=(--peerAddresses "localhost:$(peer_port "${org}" 0)"
-             --tlsRootCertFiles "$(peer_tls_root "${org}" 0)")
+    printf '%s\n' --peerAddresses "localhost:$(peer_port "${org}" 0)" \
+                  --tlsRootCertFiles "$(peer_tls_root "${org}" 0)"
   done
+}
+
+# collect_args <function> reads the lines a generator prints into COLLECTED_ARGS.
+collect_args() {
+  COLLECTED_ARGS=()
+  local line
+  while IFS= read -r line; do
+    COLLECTED_ARGS+=("${line}")
+  done < <("$1")
 }
 
 # ---------------------------------------------------------------------------
