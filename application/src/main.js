@@ -8,6 +8,7 @@ import { describeError, printError, printResult } from './output.js';
 
 // Importing a command module registers its commands as a side effect.
 import './commands/identity.js';
+import './commands/invoke.js';
 
 export const EXIT_OK = 0;
 export const EXIT_FAILURE = 1;
