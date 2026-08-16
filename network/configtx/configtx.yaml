@@ -1,0 +1,244 @@
+# Channel configuration for the PDASP trading system.
+#
+# Fabric 2.5 uses the channel participation API (osnadmin) and has no system
+# channel. Every application channel gets its own genesis block containing both an
+# Orderer and an Application section, which is why the profile below has both.
+#
+# MSP directory paths are relative to the directory holding this file.
+#
+# Generating a genesis block:
+#   configtxgen -profile PdaspChannel -outputBlock <file>.block -channelID channel1
+
+---
+################################################################################
+#   ORGANIZATIONS
+################################################################################
+Organizations:
+
+  - &OrdererOrg
+    Name: OrdererOrg
+    ID: OrdererMSP
+    MSPDir: ../organizations/ordererOrganizations/pdasp.com/msp
+
+    # Three node RAFT cluster. Quorum is 2, so the network survives losing one node.
+    OrdererEndpoints:
+      - orderer.pdasp.com:7050
+      - orderer2.pdasp.com:7060
+      - orderer3.pdasp.com:7070
+
+    Policies:
+      Readers:
+        Type: Signature
+        Rule: "OR('OrdererMSP.member')"
+      Writers:
+        Type: Signature
+        Rule: "OR('OrdererMSP.member')"
+      Admins:
+        Type: Signature
+        Rule: "OR('OrdererMSP.admin')"
+
+  # ------------------------------------------------------------ Org1: Merchants
+  - &Org1
+    Name: Org1MSP
+    ID: Org1MSP
+    MSPDir: ../organizations/peerOrganizations/org1.pdasp.com/msp
+    Policies:
+      Readers:
+        Type: Signature
+        Rule: "OR('Org1MSP.admin', 'Org1MSP.peer', 'Org1MSP.client')"
+      Writers:
+        Type: Signature
+        Rule: "OR('Org1MSP.admin', 'Org1MSP.client')"
+      Admins:
+        Type: Signature
+        Rule: "OR('Org1MSP.admin')"
+      Endorsement:
+        Type: Signature
+        Rule: "OR('Org1MSP.peer')"
+    AnchorPeers:
+      - Host: peer0.org1.pdasp.com
+        Port: 7051
+
+  # ------------------------------------------------------------ Org2: Customers
+  - &Org2
+    Name: Org2MSP
+    ID: Org2MSP
+    MSPDir: ../organizations/peerOrganizations/org2.pdasp.com/msp
+    Policies:
+      Readers:
+        Type: Signature
+        Rule: "OR('Org2MSP.admin', 'Org2MSP.peer', 'Org2MSP.client')"
+      Writers:
+        Type: Signature
+        Rule: "OR('Org2MSP.admin', 'Org2MSP.client')"
+      Admins:
+        Type: Signature
+        Rule: "OR('Org2MSP.admin')"
+      Endorsement:
+        Type: Signature
+        Rule: "OR('Org2MSP.peer')"
+    AnchorPeers:
+      - Host: peer0.org2.pdasp.com
+        Port: 8051
+
+  # ------------------------------------------------------------ Org3: Regulator
+  - &Org3
+    Name: Org3MSP
+    ID: Org3MSP
+    MSPDir: ../organizations/peerOrganizations/org3.pdasp.com/msp
+    Policies:
+      Readers:
+        Type: Signature
+        Rule: "OR('Org3MSP.admin', 'Org3MSP.peer', 'Org3MSP.client')"
+      Writers:
+        Type: Signature
+        Rule: "OR('Org3MSP.admin', 'Org3MSP.client')"
+      Admins:
+        Type: Signature
+        Rule: "OR('Org3MSP.admin')"
+      Endorsement:
+        Type: Signature
+        Rule: "OR('Org3MSP.peer')"
+    AnchorPeers:
+      - Host: peer0.org3.pdasp.com
+        Port: 9051
+
+################################################################################
+#   CAPABILITIES
+################################################################################
+Capabilities:
+  Channel: &ChannelCapabilities
+    V2_0: true
+  Orderer: &OrdererCapabilities
+    V2_0: true
+  Application: &ApplicationCapabilities
+    V2_0: true
+
+################################################################################
+#   APPLICATION
+################################################################################
+Application: &ApplicationDefaults
+  Organizations:
+
+  Policies:
+    Readers:
+      Type: ImplicitMeta
+      Rule: "ANY Readers"
+    Writers:
+      Type: ImplicitMeta
+      Rule: "ANY Writers"
+    Admins:
+      Type: ImplicitMeta
+      Rule: "MAJORITY Admins"
+
+    # A chaincode definition must be approved by a majority of organizations
+    # (2 of 3) before it can be committed.
+    LifecycleEndorsement:
+      Type: ImplicitMeta
+      Rule: "MAJORITY Endorsement"
+
+    # Default endorsement policy for chaincode that does not declare its own.
+    # The `trade` chaincode explicitly sets OutOf(2, ...) at commit time.
+    Endorsement:
+      Type: ImplicitMeta
+      Rule: "MAJORITY Endorsement"
+
+  Capabilities:
+    <<: *ApplicationCapabilities
+
+################################################################################
+#   ORDERER (RAFT)
+################################################################################
+Orderer: &OrdererDefaults
+  OrdererType: etcdraft
+
+  Addresses:
+    - orderer.pdasp.com:7050
+    - orderer2.pdasp.com:7060
+    - orderer3.pdasp.com:7070
+
+  EtcdRaft:
+    Consenters:
+      - Host: orderer.pdasp.com
+        Port: 7050
+        ClientTLSCert: ../organizations/ordererOrganizations/pdasp.com/orderers/orderer.pdasp.com/tls/server.crt
+        ServerTLSCert: ../organizations/ordererOrganizations/pdasp.com/orderers/orderer.pdasp.com/tls/server.crt
+      - Host: orderer2.pdasp.com
+        Port: 7060
+        ClientTLSCert: ../organizations/ordererOrganizations/pdasp.com/orderers/orderer2.pdasp.com/tls/server.crt
+        ServerTLSCert: ../organizations/ordererOrganizations/pdasp.com/orderers/orderer2.pdasp.com/tls/server.crt
+      - Host: orderer3.pdasp.com
+        Port: 7070
+        ClientTLSCert: ../organizations/ordererOrganizations/pdasp.com/orderers/orderer3.pdasp.com/tls/server.crt
+        ServerTLSCert: ../organizations/ordererOrganizations/pdasp.com/orderers/orderer3.pdasp.com/tls/server.crt
+
+  # ---------------------------------------------------------------------------
+  # ASSIGNMENT REQUIREMENT: a block is cut once 2 transactions have accumulated
+  # OR after 1 second, whichever comes first.
+  # ---------------------------------------------------------------------------
+  BatchTimeout: 1s
+  BatchSize:
+    MaxMessageCount: 2
+    AbsoluteMaxBytes: 10 MB
+    PreferredMaxBytes: 2 MB
+
+  Organizations:
+
+  Policies:
+    Readers:
+      Type: ImplicitMeta
+      Rule: "ANY Readers"
+    Writers:
+      Type: ImplicitMeta
+      Rule: "ANY Writers"
+    Admins:
+      Type: ImplicitMeta
+      Rule: "MAJORITY Admins"
+    BlockValidation:
+      Type: ImplicitMeta
+      Rule: "ANY Writers"
+
+################################################################################
+#   CHANNEL
+################################################################################
+Channel: &ChannelDefaults
+  Policies:
+    Readers:
+      Type: ImplicitMeta
+      Rule: "ANY Readers"
+    Writers:
+      Type: ImplicitMeta
+      Rule: "ANY Writers"
+    Admins:
+      Type: ImplicitMeta
+      Rule: "MAJORITY Admins"
+
+  Capabilities:
+    <<: *ChannelCapabilities
+
+################################################################################
+#   PROFILES
+################################################################################
+#
+# A single profile serves both channels. The channel name is not part of the
+# profile; it is passed to configtxgen as -channelID, so a second profile would be
+# a literal copy of this one. channel1 and channel2 share the same configuration
+# (same organizations, same orderer set, same anchor peers) and differ only in the
+# data they hold, because the ledger is fully separate per channel.
+#
+Profiles:
+
+  PdaspChannel:
+    <<: *ChannelDefaults
+    Orderer:
+      <<: *OrdererDefaults
+      Organizations:
+        - *OrdererOrg
+      Capabilities: *OrdererCapabilities
+    Application:
+      <<: *ApplicationDefaults
+      Organizations:
+        - *Org1
+        - *Org2
+        - *Org3
+      Capabilities: *ApplicationCapabilities
