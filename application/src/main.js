@@ -9,6 +9,7 @@ import { describeError, printError, printResult } from './output.js';
 // Importing a command module registers its commands as a side effect.
 import './commands/identity.js';
 import './commands/invoke.js';
+import './commands/query.js';
 
 export const EXIT_OK = 0;
 export const EXIT_FAILURE = 1;
@@ -21,9 +22,11 @@ export const EXIT_USAGE = 2;
  * @returns {Promise<number>} process exit code
  */
 export async function run(argv) {
+  // No arguments means the interactive menu. It is imported lazily so that a
+  // single command invocation does not pay for readline or the menu tables.
   if (argv.length === 0) {
-    printHelp();
-    return EXIT_OK;
+    const { runMenu } = await import('./menu.js');
+    return runMenu();
   }
 
   const { command, positional, flags } = parseArgs(argv);
@@ -63,6 +66,7 @@ PDASP trading system, console client
 
   node src/index.js                  start the interactive menu
   node src/index.js <command> ...    run a single command
+  node src/index.js help <command>   help for one command
 
 Common flags (any command that talks to the ledger):
 
