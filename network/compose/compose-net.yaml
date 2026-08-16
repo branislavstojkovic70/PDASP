@@ -1,0 +1,463 @@
+# Core of the Fabric network: 3 RAFT orderers, 9 peers (3 organizations x 3) each
+# with its own CouchDB instance, and a CLI container for ad hoc `peer` commands.
+#
+# Orderers start with BOOTSTRAPMETHOD=none and the channel participation API
+# enabled. Channels are not injected via a genesis block at startup; they are
+# joined later through `osnadmin channel join` (create-channels.sh).
+#
+# Chaincode is built inside a docker container launched by the peer, so every peer
+# needs access to the host docker socket.
+
+networks:
+  pdasp:
+    name: ${DOCKER_NETWORK}
+
+volumes:
+  orderer.pdasp.com:
+  orderer2.pdasp.com:
+  orderer3.pdasp.com:
+  peer0.org1.pdasp.com:
+  peer1.org1.pdasp.com:
+  peer2.org1.pdasp.com:
+  peer0.org2.pdasp.com:
+  peer1.org2.pdasp.com:
+  peer2.org2.pdasp.com:
+  peer0.org3.pdasp.com:
+  peer1.org3.pdasp.com:
+  peer2.org3.pdasp.com:
+
+################################################################################
+#   SHARED FRAGMENTS
+################################################################################
+
+x-orderer-common: &orderer-common
+  image: hyperledger/fabric-orderer:${IMAGE_TAG}
+  labels:
+    pdasp.role: orderer
+  working_dir: /root
+  command: orderer
+  networks:
+    - pdasp
+
+# These paths are container internal, so they are identical for all three orderers.
+x-orderer-environment: &orderer-environment
+  FABRIC_LOGGING_SPEC: ${FABRIC_LOGGING_SPEC}
+  ORDERER_GENERAL_LISTENADDRESS: 0.0.0.0
+  ORDERER_GENERAL_LOCALMSPID: ${ORDERER_MSP}
+  ORDERER_GENERAL_LOCALMSPDIR: /var/hyperledger/orderer/msp
+  ORDERER_GENERAL_TLS_ENABLED: "true"
+  ORDERER_GENERAL_TLS_PRIVATEKEY: /var/hyperledger/orderer/tls/server.key
+  ORDERER_GENERAL_TLS_CERTIFICATE: /var/hyperledger/orderer/tls/server.crt
+  ORDERER_GENERAL_TLS_ROOTCAS: "[/var/hyperledger/orderer/tls/ca.crt]"
+  # RAFT traffic between orderers uses the same port as client traffic; a separate
+  # cluster listener is unnecessary when TLS is enabled.
+  ORDERER_GENERAL_CLUSTER_CLIENTCERTIFICATE: /var/hyperledger/orderer/tls/server.crt
+  ORDERER_GENERAL_CLUSTER_CLIENTPRIVATEKEY: /var/hyperledger/orderer/tls/server.key
+  ORDERER_GENERAL_CLUSTER_ROOTCAS: "[/var/hyperledger/orderer/tls/ca.crt]"
+  # No system channel: channels are joined through osnadmin.
+  ORDERER_GENERAL_BOOTSTRAPMETHOD: none
+  ORDERER_CHANNELPARTICIPATION_ENABLED: "true"
+  # The admin endpoint (osnadmin) requires mutual TLS: the client must present a
+  # certificate issued by the same root as the orderer.
+  ORDERER_ADMIN_TLS_ENABLED: "true"
+  ORDERER_ADMIN_TLS_CERTIFICATE: /var/hyperledger/orderer/tls/server.crt
+  ORDERER_ADMIN_TLS_PRIVATEKEY: /var/hyperledger/orderer/tls/server.key
+  ORDERER_ADMIN_TLS_ROOTCAS: "[/var/hyperledger/orderer/tls/ca.crt]"
+  ORDERER_ADMIN_TLS_CLIENTROOTCAS: "[/var/hyperledger/orderer/tls/ca.crt]"
+  ORDERER_FILELEDGER_LOCATION: /var/hyperledger/production/orderer
+  ORDERER_METRICS_PROVIDER: prometheus
+
+x-peer-common: &peer-common
+  image: hyperledger/fabric-peer:${IMAGE_TAG}
+  labels:
+    pdasp.role: peer
+  working_dir: /opt/gopath/src/github.com/hyperledger/fabric/peer
+  command: peer node start
+  networks:
+    - pdasp
+
+x-peer-environment: &peer-environment
+  FABRIC_LOGGING_SPEC: ${FABRIC_LOGGING_SPEC}
+  CORE_PEER_MSPCONFIGPATH: /etc/hyperledger/fabric/msp
+  CORE_PEER_TLS_ENABLED: "true"
+  CORE_PEER_TLS_CERT_FILE: /etc/hyperledger/fabric/tls/server.crt
+  CORE_PEER_TLS_KEY_FILE: /etc/hyperledger/fabric/tls/server.key
+  CORE_PEER_TLS_ROOTCERT_FILE: /etc/hyperledger/fabric/tls/ca.crt
+  CORE_PEER_PROFILE_ENABLED: "false"
+  # Every peer is both endorser and committer. That is the default behaviour and
+  # nothing here disables it (assignment requirement).
+  CORE_PEER_GOSSIP_USELEADERELECTION: "true"
+  CORE_PEER_GOSSIP_ORGLEADER: "false"
+  # Peer Gateway service, used by the Node application (@hyperledger/fabric-gateway).
+  CORE_PEER_GATEWAY_ENABLED: "true"
+  # ASSIGNMENT REQUIREMENT: the state database is CouchDB, not the default LevelDB.
+  CORE_LEDGER_STATE_STATEDATABASE: CouchDB
+  CORE_LEDGER_STATE_COUCHDBCONFIG_USERNAME: ${COUCHDB_USER}
+  CORE_LEDGER_STATE_COUCHDBCONFIG_PASSWORD: ${COUCHDB_PASSWORD}
+  # The peer builds and runs chaincode as a docker container on the host daemon.
+  CORE_VM_ENDPOINT: unix:///host/var/run/docker.sock
+  CORE_VM_DOCKER_HOSTCONFIG_NETWORKMODE: ${DOCKER_NETWORK}
+  # Explicit tags instead of the defaults (fabric-ccenv:2.5), so the images pulled
+  # by install-fabric.sh do not need to be re-tagged.
+  CORE_CHAINCODE_BUILDER: hyperledger/fabric-ccenv:${IMAGE_TAG}
+  CORE_CHAINCODE_GOLANG_RUNTIME: hyperledger/fabric-baseos:${IMAGE_TAG}
+  # The first Go chaincode build can take longer than the default 30s.
+  CORE_CHAINCODE_EXECUTETIMEOUT: 300s
+  CORE_METRICS_PROVIDER: prometheus
+
+x-couchdb-common: &couchdb-common
+  image: couchdb:${COUCHDB_VERSION}
+  labels:
+    pdasp.role: couchdb
+  environment:
+    COUCHDB_USER: ${COUCHDB_USER}
+    COUCHDB_PASSWORD: ${COUCHDB_PASSWORD}
+  networks:
+    - pdasp
+
+################################################################################
+#   SERVICES
+################################################################################
+services:
+
+  # ------------------------------------------- ORDERERS (RAFT, quorum 2 of 3)
+  orderer.pdasp.com:
+    <<: *orderer-common
+    container_name: orderer.pdasp.com
+    environment:
+      <<: *orderer-environment
+      ORDERER_GENERAL_LISTENPORT: "${ORDERER1_PORT}"
+      ORDERER_ADMIN_LISTENADDRESS: 0.0.0.0:${ORDERER1_ADMIN_PORT}
+      ORDERER_OPERATIONS_LISTENADDRESS: 0.0.0.0:${ORDERER1_OPS_PORT}
+    ports:
+      - "${ORDERER1_PORT}:${ORDERER1_PORT}"
+      - "${ORDERER1_ADMIN_PORT}:${ORDERER1_ADMIN_PORT}"
+      - "${ORDERER1_OPS_PORT}:${ORDERER1_OPS_PORT}"
+    volumes:
+      - ../organizations/ordererOrganizations/pdasp.com/orderers/orderer.pdasp.com/msp:/var/hyperledger/orderer/msp
+      - ../organizations/ordererOrganizations/pdasp.com/orderers/orderer.pdasp.com/tls:/var/hyperledger/orderer/tls
+      - orderer.pdasp.com:/var/hyperledger/production/orderer
+
+  orderer2.pdasp.com:
+    <<: *orderer-common
+    container_name: orderer2.pdasp.com
+    environment:
+      <<: *orderer-environment
+      ORDERER_GENERAL_LISTENPORT: "${ORDERER2_PORT}"
+      ORDERER_ADMIN_LISTENADDRESS: 0.0.0.0:${ORDERER2_ADMIN_PORT}
+      ORDERER_OPERATIONS_LISTENADDRESS: 0.0.0.0:${ORDERER2_OPS_PORT}
+    ports:
+      - "${ORDERER2_PORT}:${ORDERER2_PORT}"
+      - "${ORDERER2_ADMIN_PORT}:${ORDERER2_ADMIN_PORT}"
+      - "${ORDERER2_OPS_PORT}:${ORDERER2_OPS_PORT}"
+    volumes:
+      - ../organizations/ordererOrganizations/pdasp.com/orderers/orderer2.pdasp.com/msp:/var/hyperledger/orderer/msp
+      - ../organizations/ordererOrganizations/pdasp.com/orderers/orderer2.pdasp.com/tls:/var/hyperledger/orderer/tls
+      - orderer2.pdasp.com:/var/hyperledger/production/orderer
+
+  orderer3.pdasp.com:
+    <<: *orderer-common
+    container_name: orderer3.pdasp.com
+    environment:
+      <<: *orderer-environment
+      ORDERER_GENERAL_LISTENPORT: "${ORDERER3_PORT}"
+      ORDERER_ADMIN_LISTENADDRESS: 0.0.0.0:${ORDERER3_ADMIN_PORT}
+      ORDERER_OPERATIONS_LISTENADDRESS: 0.0.0.0:${ORDERER3_OPS_PORT}
+    ports:
+      - "${ORDERER3_PORT}:${ORDERER3_PORT}"
+      - "${ORDERER3_ADMIN_PORT}:${ORDERER3_ADMIN_PORT}"
+      - "${ORDERER3_OPS_PORT}:${ORDERER3_OPS_PORT}"
+    volumes:
+      - ../organizations/ordererOrganizations/pdasp.com/orderers/orderer3.pdasp.com/msp:/var/hyperledger/orderer/msp
+      - ../organizations/ordererOrganizations/pdasp.com/orderers/orderer3.pdasp.com/tls:/var/hyperledger/orderer/tls
+      - orderer3.pdasp.com:/var/hyperledger/production/orderer
+
+  # ------------------------------------------------------------- CouchDB x9
+  couchdb0:
+    <<: *couchdb-common
+    container_name: couchdb0
+    ports: ["${COUCHDB0_PORT}:5984"]
+  couchdb1:
+    <<: *couchdb-common
+    container_name: couchdb1
+    ports: ["${COUCHDB1_PORT}:5984"]
+  couchdb2:
+    <<: *couchdb-common
+    container_name: couchdb2
+    ports: ["${COUCHDB2_PORT}:5984"]
+  couchdb3:
+    <<: *couchdb-common
+    container_name: couchdb3
+    ports: ["${COUCHDB3_PORT}:5984"]
+  couchdb4:
+    <<: *couchdb-common
+    container_name: couchdb4
+    ports: ["${COUCHDB4_PORT}:5984"]
+  couchdb5:
+    <<: *couchdb-common
+    container_name: couchdb5
+    ports: ["${COUCHDB5_PORT}:5984"]
+  couchdb6:
+    <<: *couchdb-common
+    container_name: couchdb6
+    ports: ["${COUCHDB6_PORT}:5984"]
+  couchdb7:
+    <<: *couchdb-common
+    container_name: couchdb7
+    ports: ["${COUCHDB7_PORT}:5984"]
+  couchdb8:
+    <<: *couchdb-common
+    container_name: couchdb8
+    ports: ["${COUCHDB8_PORT}:5984"]
+
+  # ------------------------------------------------------- Org1: "Merchants"
+  peer0.org1.pdasp.com:
+    <<: *peer-common
+    container_name: peer0.org1.pdasp.com
+    depends_on: [couchdb0]
+    environment:
+      <<: *peer-environment
+      CORE_PEER_ID: peer0.org1.pdasp.com
+      CORE_PEER_LOCALMSPID: ${ORG1_MSP}
+      CORE_PEER_ADDRESS: peer0.org1.pdasp.com:${PEER0_ORG1_PORT}
+      CORE_PEER_LISTENADDRESS: 0.0.0.0:${PEER0_ORG1_PORT}
+      CORE_PEER_CHAINCODEADDRESS: peer0.org1.pdasp.com:7052
+      CORE_PEER_CHAINCODELISTENADDRESS: 0.0.0.0:7052
+      CORE_PEER_GOSSIP_EXTERNALENDPOINT: peer0.org1.pdasp.com:${PEER0_ORG1_PORT}
+      CORE_PEER_GOSSIP_BOOTSTRAP: peer1.org1.pdasp.com:${PEER1_ORG1_PORT}
+      CORE_LEDGER_STATE_COUCHDBCONFIG_COUCHDBADDRESS: couchdb0:5984
+      CORE_OPERATIONS_LISTENADDRESS: 0.0.0.0:${PEER0_ORG1_OPS_PORT}
+    ports:
+      - "${PEER0_ORG1_PORT}:${PEER0_ORG1_PORT}"
+      - "${PEER0_ORG1_OPS_PORT}:${PEER0_ORG1_OPS_PORT}"
+    volumes:
+      - /var/run/docker.sock:/host/var/run/docker.sock
+      - ../organizations/peerOrganizations/org1.pdasp.com/peers/peer0.org1.pdasp.com/msp:/etc/hyperledger/fabric/msp
+      - ../organizations/peerOrganizations/org1.pdasp.com/peers/peer0.org1.pdasp.com/tls:/etc/hyperledger/fabric/tls
+      - peer0.org1.pdasp.com:/var/hyperledger/production
+
+  peer1.org1.pdasp.com:
+    <<: *peer-common
+    container_name: peer1.org1.pdasp.com
+    depends_on: [couchdb1]
+    environment:
+      <<: *peer-environment
+      CORE_PEER_ID: peer1.org1.pdasp.com
+      CORE_PEER_LOCALMSPID: ${ORG1_MSP}
+      CORE_PEER_ADDRESS: peer1.org1.pdasp.com:${PEER1_ORG1_PORT}
+      CORE_PEER_LISTENADDRESS: 0.0.0.0:${PEER1_ORG1_PORT}
+      CORE_PEER_CHAINCODEADDRESS: peer1.org1.pdasp.com:7152
+      CORE_PEER_CHAINCODELISTENADDRESS: 0.0.0.0:7152
+      CORE_PEER_GOSSIP_EXTERNALENDPOINT: peer1.org1.pdasp.com:${PEER1_ORG1_PORT}
+      CORE_PEER_GOSSIP_BOOTSTRAP: peer0.org1.pdasp.com:${PEER0_ORG1_PORT}
+      CORE_LEDGER_STATE_COUCHDBCONFIG_COUCHDBADDRESS: couchdb1:5984
+      CORE_OPERATIONS_LISTENADDRESS: 0.0.0.0:${PEER1_ORG1_OPS_PORT}
+    ports:
+      - "${PEER1_ORG1_PORT}:${PEER1_ORG1_PORT}"
+      - "${PEER1_ORG1_OPS_PORT}:${PEER1_ORG1_OPS_PORT}"
+    volumes:
+      - /var/run/docker.sock:/host/var/run/docker.sock
+      - ../organizations/peerOrganizations/org1.pdasp.com/peers/peer1.org1.pdasp.com/msp:/etc/hyperledger/fabric/msp
+      - ../organizations/peerOrganizations/org1.pdasp.com/peers/peer1.org1.pdasp.com/tls:/etc/hyperledger/fabric/tls
+      - peer1.org1.pdasp.com:/var/hyperledger/production
+
+  peer2.org1.pdasp.com:
+    <<: *peer-common
+    container_name: peer2.org1.pdasp.com
+    depends_on: [couchdb2]
+    environment:
+      <<: *peer-environment
+      CORE_PEER_ID: peer2.org1.pdasp.com
+      CORE_PEER_LOCALMSPID: ${ORG1_MSP}
+      CORE_PEER_ADDRESS: peer2.org1.pdasp.com:${PEER2_ORG1_PORT}
+      CORE_PEER_LISTENADDRESS: 0.0.0.0:${PEER2_ORG1_PORT}
+      CORE_PEER_CHAINCODEADDRESS: peer2.org1.pdasp.com:7252
+      CORE_PEER_CHAINCODELISTENADDRESS: 0.0.0.0:7252
+      CORE_PEER_GOSSIP_EXTERNALENDPOINT: peer2.org1.pdasp.com:${PEER2_ORG1_PORT}
+      CORE_PEER_GOSSIP_BOOTSTRAP: peer0.org1.pdasp.com:${PEER0_ORG1_PORT}
+      CORE_LEDGER_STATE_COUCHDBCONFIG_COUCHDBADDRESS: couchdb2:5984
+      CORE_OPERATIONS_LISTENADDRESS: 0.0.0.0:${PEER2_ORG1_OPS_PORT}
+    ports:
+      - "${PEER2_ORG1_PORT}:${PEER2_ORG1_PORT}"
+      - "${PEER2_ORG1_OPS_PORT}:${PEER2_ORG1_OPS_PORT}"
+    volumes:
+      - /var/run/docker.sock:/host/var/run/docker.sock
+      - ../organizations/peerOrganizations/org1.pdasp.com/peers/peer2.org1.pdasp.com/msp:/etc/hyperledger/fabric/msp
+      - ../organizations/peerOrganizations/org1.pdasp.com/peers/peer2.org1.pdasp.com/tls:/etc/hyperledger/fabric/tls
+      - peer2.org1.pdasp.com:/var/hyperledger/production
+
+  # ------------------------------------------------------- Org2: "Customers"
+  peer0.org2.pdasp.com:
+    <<: *peer-common
+    container_name: peer0.org2.pdasp.com
+    depends_on: [couchdb3]
+    environment:
+      <<: *peer-environment
+      CORE_PEER_ID: peer0.org2.pdasp.com
+      CORE_PEER_LOCALMSPID: ${ORG2_MSP}
+      CORE_PEER_ADDRESS: peer0.org2.pdasp.com:${PEER0_ORG2_PORT}
+      CORE_PEER_LISTENADDRESS: 0.0.0.0:${PEER0_ORG2_PORT}
+      CORE_PEER_CHAINCODEADDRESS: peer0.org2.pdasp.com:8052
+      CORE_PEER_CHAINCODELISTENADDRESS: 0.0.0.0:8052
+      CORE_PEER_GOSSIP_EXTERNALENDPOINT: peer0.org2.pdasp.com:${PEER0_ORG2_PORT}
+      CORE_PEER_GOSSIP_BOOTSTRAP: peer1.org2.pdasp.com:${PEER1_ORG2_PORT}
+      CORE_LEDGER_STATE_COUCHDBCONFIG_COUCHDBADDRESS: couchdb3:5984
+      CORE_OPERATIONS_LISTENADDRESS: 0.0.0.0:${PEER0_ORG2_OPS_PORT}
+    ports:
+      - "${PEER0_ORG2_PORT}:${PEER0_ORG2_PORT}"
+      - "${PEER0_ORG2_OPS_PORT}:${PEER0_ORG2_OPS_PORT}"
+    volumes:
+      - /var/run/docker.sock:/host/var/run/docker.sock
+      - ../organizations/peerOrganizations/org2.pdasp.com/peers/peer0.org2.pdasp.com/msp:/etc/hyperledger/fabric/msp
+      - ../organizations/peerOrganizations/org2.pdasp.com/peers/peer0.org2.pdasp.com/tls:/etc/hyperledger/fabric/tls
+      - peer0.org2.pdasp.com:/var/hyperledger/production
+
+  peer1.org2.pdasp.com:
+    <<: *peer-common
+    container_name: peer1.org2.pdasp.com
+    depends_on: [couchdb4]
+    environment:
+      <<: *peer-environment
+      CORE_PEER_ID: peer1.org2.pdasp.com
+      CORE_PEER_LOCALMSPID: ${ORG2_MSP}
+      CORE_PEER_ADDRESS: peer1.org2.pdasp.com:${PEER1_ORG2_PORT}
+      CORE_PEER_LISTENADDRESS: 0.0.0.0:${PEER1_ORG2_PORT}
+      CORE_PEER_CHAINCODEADDRESS: peer1.org2.pdasp.com:8152
+      CORE_PEER_CHAINCODELISTENADDRESS: 0.0.0.0:8152
+      CORE_PEER_GOSSIP_EXTERNALENDPOINT: peer1.org2.pdasp.com:${PEER1_ORG2_PORT}
+      CORE_PEER_GOSSIP_BOOTSTRAP: peer0.org2.pdasp.com:${PEER0_ORG2_PORT}
+      CORE_LEDGER_STATE_COUCHDBCONFIG_COUCHDBADDRESS: couchdb4:5984
+      CORE_OPERATIONS_LISTENADDRESS: 0.0.0.0:${PEER1_ORG2_OPS_PORT}
+    ports:
+      - "${PEER1_ORG2_PORT}:${PEER1_ORG2_PORT}"
+      - "${PEER1_ORG2_OPS_PORT}:${PEER1_ORG2_OPS_PORT}"
+    volumes:
+      - /var/run/docker.sock:/host/var/run/docker.sock
+      - ../organizations/peerOrganizations/org2.pdasp.com/peers/peer1.org2.pdasp.com/msp:/etc/hyperledger/fabric/msp
+      - ../organizations/peerOrganizations/org2.pdasp.com/peers/peer1.org2.pdasp.com/tls:/etc/hyperledger/fabric/tls
+      - peer1.org2.pdasp.com:/var/hyperledger/production
+
+  peer2.org2.pdasp.com:
+    <<: *peer-common
+    container_name: peer2.org2.pdasp.com
+    depends_on: [couchdb5]
+    environment:
+      <<: *peer-environment
+      CORE_PEER_ID: peer2.org2.pdasp.com
+      CORE_PEER_LOCALMSPID: ${ORG2_MSP}
+      CORE_PEER_ADDRESS: peer2.org2.pdasp.com:${PEER2_ORG2_PORT}
+      CORE_PEER_LISTENADDRESS: 0.0.0.0:${PEER2_ORG2_PORT}
+      CORE_PEER_CHAINCODEADDRESS: peer2.org2.pdasp.com:8252
+      CORE_PEER_CHAINCODELISTENADDRESS: 0.0.0.0:8252
+      CORE_PEER_GOSSIP_EXTERNALENDPOINT: peer2.org2.pdasp.com:${PEER2_ORG2_PORT}
+      CORE_PEER_GOSSIP_BOOTSTRAP: peer0.org2.pdasp.com:${PEER0_ORG2_PORT}
+      CORE_LEDGER_STATE_COUCHDBCONFIG_COUCHDBADDRESS: couchdb5:5984
+      CORE_OPERATIONS_LISTENADDRESS: 0.0.0.0:${PEER2_ORG2_OPS_PORT}
+    ports:
+      - "${PEER2_ORG2_PORT}:${PEER2_ORG2_PORT}"
+      - "${PEER2_ORG2_OPS_PORT}:${PEER2_ORG2_OPS_PORT}"
+    volumes:
+      - /var/run/docker.sock:/host/var/run/docker.sock
+      - ../organizations/peerOrganizations/org2.pdasp.com/peers/peer2.org2.pdasp.com/msp:/etc/hyperledger/fabric/msp
+      - ../organizations/peerOrganizations/org2.pdasp.com/peers/peer2.org2.pdasp.com/tls:/etc/hyperledger/fabric/tls
+      - peer2.org2.pdasp.com:/var/hyperledger/production
+
+  # ------------------------------------------------------- Org3: "Regulator"
+  peer0.org3.pdasp.com:
+    <<: *peer-common
+    container_name: peer0.org3.pdasp.com
+    depends_on: [couchdb6]
+    environment:
+      <<: *peer-environment
+      CORE_PEER_ID: peer0.org3.pdasp.com
+      CORE_PEER_LOCALMSPID: ${ORG3_MSP}
+      CORE_PEER_ADDRESS: peer0.org3.pdasp.com:${PEER0_ORG3_PORT}
+      CORE_PEER_LISTENADDRESS: 0.0.0.0:${PEER0_ORG3_PORT}
+      CORE_PEER_CHAINCODEADDRESS: peer0.org3.pdasp.com:9052
+      CORE_PEER_CHAINCODELISTENADDRESS: 0.0.0.0:9052
+      CORE_PEER_GOSSIP_EXTERNALENDPOINT: peer0.org3.pdasp.com:${PEER0_ORG3_PORT}
+      CORE_PEER_GOSSIP_BOOTSTRAP: peer1.org3.pdasp.com:${PEER1_ORG3_PORT}
+      CORE_LEDGER_STATE_COUCHDBCONFIG_COUCHDBADDRESS: couchdb6:5984
+      CORE_OPERATIONS_LISTENADDRESS: 0.0.0.0:${PEER0_ORG3_OPS_PORT}
+    ports:
+      - "${PEER0_ORG3_PORT}:${PEER0_ORG3_PORT}"
+      - "${PEER0_ORG3_OPS_PORT}:${PEER0_ORG3_OPS_PORT}"
+    volumes:
+      - /var/run/docker.sock:/host/var/run/docker.sock
+      - ../organizations/peerOrganizations/org3.pdasp.com/peers/peer0.org3.pdasp.com/msp:/etc/hyperledger/fabric/msp
+      - ../organizations/peerOrganizations/org3.pdasp.com/peers/peer0.org3.pdasp.com/tls:/etc/hyperledger/fabric/tls
+      - peer0.org3.pdasp.com:/var/hyperledger/production
+
+  peer1.org3.pdasp.com:
+    <<: *peer-common
+    container_name: peer1.org3.pdasp.com
+    depends_on: [couchdb7]
+    environment:
+      <<: *peer-environment
+      CORE_PEER_ID: peer1.org3.pdasp.com
+      CORE_PEER_LOCALMSPID: ${ORG3_MSP}
+      CORE_PEER_ADDRESS: peer1.org3.pdasp.com:${PEER1_ORG3_PORT}
+      CORE_PEER_LISTENADDRESS: 0.0.0.0:${PEER1_ORG3_PORT}
+      CORE_PEER_CHAINCODEADDRESS: peer1.org3.pdasp.com:9152
+      CORE_PEER_CHAINCODELISTENADDRESS: 0.0.0.0:9152
+      CORE_PEER_GOSSIP_EXTERNALENDPOINT: peer1.org3.pdasp.com:${PEER1_ORG3_PORT}
+      CORE_PEER_GOSSIP_BOOTSTRAP: peer0.org3.pdasp.com:${PEER0_ORG3_PORT}
+      CORE_LEDGER_STATE_COUCHDBCONFIG_COUCHDBADDRESS: couchdb7:5984
+      CORE_OPERATIONS_LISTENADDRESS: 0.0.0.0:${PEER1_ORG3_OPS_PORT}
+    ports:
+      - "${PEER1_ORG3_PORT}:${PEER1_ORG3_PORT}"
+      - "${PEER1_ORG3_OPS_PORT}:${PEER1_ORG3_OPS_PORT}"
+    volumes:
+      - /var/run/docker.sock:/host/var/run/docker.sock
+      - ../organizations/peerOrganizations/org3.pdasp.com/peers/peer1.org3.pdasp.com/msp:/etc/hyperledger/fabric/msp
+      - ../organizations/peerOrganizations/org3.pdasp.com/peers/peer1.org3.pdasp.com/tls:/etc/hyperledger/fabric/tls
+      - peer1.org3.pdasp.com:/var/hyperledger/production
+
+  peer2.org3.pdasp.com:
+    <<: *peer-common
+    container_name: peer2.org3.pdasp.com
+    depends_on: [couchdb8]
+    environment:
+      <<: *peer-environment
+      CORE_PEER_ID: peer2.org3.pdasp.com
+      CORE_PEER_LOCALMSPID: ${ORG3_MSP}
+      CORE_PEER_ADDRESS: peer2.org3.pdasp.com:${PEER2_ORG3_PORT}
+      CORE_PEER_LISTENADDRESS: 0.0.0.0:${PEER2_ORG3_PORT}
+      CORE_PEER_CHAINCODEADDRESS: peer2.org3.pdasp.com:9252
+      CORE_PEER_CHAINCODELISTENADDRESS: 0.0.0.0:9252
+      CORE_PEER_GOSSIP_EXTERNALENDPOINT: peer2.org3.pdasp.com:${PEER2_ORG3_PORT}
+      CORE_PEER_GOSSIP_BOOTSTRAP: peer0.org3.pdasp.com:${PEER0_ORG3_PORT}
+      CORE_LEDGER_STATE_COUCHDBCONFIG_COUCHDBADDRESS: couchdb8:5984
+      CORE_OPERATIONS_LISTENADDRESS: 0.0.0.0:${PEER2_ORG3_OPS_PORT}
+    ports:
+      - "${PEER2_ORG3_PORT}:${PEER2_ORG3_PORT}"
+      - "${PEER2_ORG3_OPS_PORT}:${PEER2_ORG3_OPS_PORT}"
+    volumes:
+      - /var/run/docker.sock:/host/var/run/docker.sock
+      - ../organizations/peerOrganizations/org3.pdasp.com/peers/peer2.org3.pdasp.com/msp:/etc/hyperledger/fabric/msp
+      - ../organizations/peerOrganizations/org3.pdasp.com/peers/peer2.org3.pdasp.com/tls:/etc/hyperledger/fabric/tls
+      - peer2.org3.pdasp.com:/var/hyperledger/production
+
+  # ------------------------------------------------------------ CLI container
+  # Not part of the network itself: it exists for ad hoc `peer` commands and
+  # inspection during development. The host scripts use the local binaries in
+  # network/bin rather than this container.
+  cli:
+    image: hyperledger/fabric-tools:${IMAGE_TAG}
+    container_name: cli
+    labels:
+      pdasp.role: cli
+    tty: true
+    stdin_open: true
+    working_dir: /opt/gopath/src/github.com/hyperledger/fabric/peer
+    command: /bin/bash
+    environment:
+      FABRIC_LOGGING_SPEC: ${FABRIC_LOGGING_SPEC}
+      CORE_PEER_TLS_ENABLED: "true"
+    volumes:
+      - /var/run/docker.sock:/host/var/run/docker.sock
+      - ../organizations:/opt/gopath/src/github.com/hyperledger/fabric/peer/organizations
+      - ../channel-artifacts:/opt/gopath/src/github.com/hyperledger/fabric/peer/channel-artifacts
+      - ../../chaincode:/opt/gopath/src/github.com/hyperledger/fabric/peer/chaincode
+    networks:
+      - pdasp
