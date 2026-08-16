@@ -84,8 +84,17 @@ func (c *TradeContract) CreateCustomers(
 		return nil, errEmptyParameter("customersJSON (empty array)")
 	}
 
+	// Duplicates within one request have to be caught here: GetState never sees
+	// writes made earlier in the same transaction, so the stateExists check in
+	// CreateCustomer cannot detect them.
+	seen := map[string]bool{}
 	created := make([]*Customer, 0, len(inputs))
 	for _, input := range inputs {
+		if seen[input.CustomerId] {
+			return nil, errDuplicateInBatch("customer", input.CustomerId)
+		}
+		seen[input.CustomerId] = true
+
 		customer, err := c.CreateCustomer(ctx, input.CustomerId, input.FirstName,
 			input.LastName, input.Email, input.OpeningBalance)
 		if err != nil {

@@ -54,6 +54,45 @@ func TestInitLedgerWritesInitialState(t *testing.T) {
 	}
 }
 
+// TestInitLedgerUnderFabricReadSemantics guards against a real failure this suite
+// once missed: inside a transaction GetState sees committed state only, never the
+// writes made earlier in the same transaction. An InitLedger that created a
+// merchant type and then went through CreateMerchant, which reads that type back
+// to validate it, failed on the live network with "merchant type 'SUPERMARKET' is
+// not in the catalogue" even though every unit test passed.
+func TestInitLedgerUnderFabricReadSemantics(t *testing.T) {
+	ctx, stub := newContext()
+	stub.fabricReadSemantics = true
+	tradeContract := new(TradeContract)
+
+	report, err := tradeContract.InitLedger(ctx)
+	if err != nil {
+		t.Fatalf("InitLedger must not read back its own writes: %v", err)
+	}
+	if report.MerchantTypes != 5 || report.Merchants != 4 ||
+		report.Products != 13 || report.Customers != 4 {
+		t.Errorf("unexpected report: %+v", report)
+	}
+
+	// After the transaction commits the data must be complete and consistent.
+	stub.commitTx()
+	merchant, err := tradeContract.ReadMerchant(ctx, "M001")
+	if err != nil {
+		t.Fatalf("ReadMerchant: %v", err)
+	}
+	if len(merchant.Products) != 4 {
+		t.Errorf("M001 should list 4 products, got %d: %v",
+			len(merchant.Products), merchant.Products)
+	}
+	product, err := tradeContract.ReadProduct(ctx, "P001")
+	if err != nil {
+		t.Fatalf("ReadProduct: %v", err)
+	}
+	if product.MerchantType != "SUPERMARKET" {
+		t.Errorf("merchantType was not denormalized: %q", product.MerchantType)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Creating entities
 // ---------------------------------------------------------------------------
@@ -121,6 +160,37 @@ func TestCreateCustomersIsAllOrNothing(t *testing.T) {
 	// when chaincode returns an error, so nothing is written to the ledger.
 	if _, err := tradeContract.ReadCustomer(ctx, "C901"); err == nil {
 		t.Error("C901 must not exist")
+	}
+}
+
+func TestBulkCreateRejectsDuplicatesWithinOneRequest(t *testing.T) {
+	ctx, stub, tradeContract := seededLedger(t)
+	// Duplicate detection must not rely on reading back what this same
+	// transaction wrote, so the test runs with real Fabric read semantics.
+	stub.fabricReadSemantics = true
+
+	_, err := tradeContract.CreateCustomers(ctx, `[
+		{"customerId":"C900","firstName":"A","lastName":"B","email":"a@example.com","openingBalance":10},
+		{"customerId":"C900","firstName":"C","lastName":"D","email":"c@example.com","openingBalance":10}
+	]`)
+	if err == nil || !strings.Contains(err.Error(), "more than once") {
+		t.Errorf("duplicate customer in one request: expected an error, got %v", err)
+	}
+
+	_, err = tradeContract.CreateMerchants(ctx, `[
+		{"merchantId":"M900","name":"A","type":"SUPERMARKET","taxId":"1","openingBalance":10},
+		{"merchantId":"M900","name":"B","type":"SUPERMARKET","taxId":"2","openingBalance":10}
+	]`)
+	if err == nil || !strings.Contains(err.Error(), "more than once") {
+		t.Errorf("duplicate merchant in one request: expected an error, got %v", err)
+	}
+
+	_, err = tradeContract.AddProducts(ctx, "M001", `[
+		{"code":"P900","name":"A","price":10,"quantity":1},
+		{"code":"P900","name":"B","price":20,"quantity":1}
+	]`)
+	if err == nil || !strings.Contains(err.Error(), "more than once") {
+		t.Errorf("duplicate product in one request: expected an error, got %v", err)
 	}
 }
 

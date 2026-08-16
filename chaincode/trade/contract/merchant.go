@@ -95,8 +95,18 @@ func (c *TradeContract) CreateMerchants(
 		return nil, errEmptyParameter("merchantsJSON (empty array)")
 	}
 
+	// Duplicates within one request have to be caught here. GetState inside a
+	// transaction reads committed state only and never sees writes made earlier in
+	// the same transaction, so the stateExists check in CreateMerchant cannot see
+	// a merchant this very call already wrote.
+	seen := map[string]bool{}
 	created := make([]*Merchant, 0, len(inputs))
 	for _, input := range inputs {
+		if seen[input.MerchantId] {
+			return nil, errDuplicateInBatch("merchant", input.MerchantId)
+		}
+		seen[input.MerchantId] = true
+
 		merchant, err := c.CreateMerchant(ctx, input.MerchantId, input.Name, input.Type,
 			input.TaxId, input.OpeningBalance)
 		if err != nil {

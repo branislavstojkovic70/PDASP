@@ -77,14 +77,29 @@ type InitReport struct {
 // committed. Existing records are skipped rather than failing the whole call, so
 // InitLedger can safely be run again, for example after a chaincode upgrade on the
 // same channel.
+//
+// The merchants and products are written directly rather than through
+// CreateMerchant and AddProduct. Those two read state back (the merchant type
+// catalogue and the merchant document) to validate their input, and inside a
+// single transaction GetState only ever sees committed state: writes made earlier
+// in the same transaction are invisible to it. Going through the public API would
+// therefore fail with "merchant type 'SUPERMARKET' is not in the catalogue" for a
+// type this very call had just written.
+//
+// The data below is a compile time table, so its internal consistency is checked
+// against that table instead of against the ledger.
 func (c *TradeContract) InitLedger(
 	ctx contractapi.TransactionContextInterface,
 ) (*InitReport, error) {
 
 	report := &InitReport{}
 
+	knownTypes := map[string]bool{}
 	for _, merchantType := range initialMerchantTypes {
-		exists, err := stateExists(ctx, merchantTypeKey(merchantType.Code))
+		knownTypes[merchantType.Code] = true
+
+		key := merchantTypeKey(merchantType.Code)
+		exists, err := stateExists(ctx, key)
 		if err != nil {
 			return nil, err
 		}
@@ -92,15 +107,20 @@ func (c *TradeContract) InitLedger(
 			report.SkippedExisting++
 			continue
 		}
-		if _, err := c.CreateMerchantType(ctx, merchantType.Code, merchantType.Name,
-			merchantType.Description); err != nil {
+		if err := writeState(ctx, key, &MerchantType{
+			DocType:     DocMerchantType,
+			Code:        merchantType.Code,
+			Name:        merchantType.Name,
+			Description: merchantType.Description,
+		}); err != nil {
 			return nil, err
 		}
 		report.MerchantTypes++
 	}
 
 	for _, input := range initialMerchants {
-		exists, err := stateExists(ctx, merchantKey(input.MerchantId))
+		key := merchantKey(input.MerchantId)
+		exists, err := stateExists(ctx, key)
 		if err != nil {
 			return nil, err
 		}
@@ -108,21 +128,51 @@ func (c *TradeContract) InitLedger(
 			report.SkippedExisting++
 			continue
 		}
-		if _, err := c.CreateMerchant(ctx, input.MerchantId, input.Name, input.Type,
-			input.TaxId, input.OpeningBalance); err != nil {
+		if !knownTypes[input.Type] {
+			return nil, errMerchantTypeNotFound(input.Type)
+		}
+
+		merchant := &Merchant{
+			DocType:    DocMerchant,
+			MerchantId: input.MerchantId,
+			Name:       input.Name,
+			Type:       input.Type,
+			TaxId:      input.TaxId,
+			Products:   []string{},
+			Invoices:   []string{},
+			Balance:    roundMoney(input.OpeningBalance),
+		}
+
+		// Products first, so the merchant document is written once with its
+		// product list already complete.
+		for _, product := range initialProducts[input.MerchantId] {
+			expiry, err := parseExpiryDate(product.ExpiryDate)
+			if err != nil {
+				return nil, err
+			}
+			if err := writeState(ctx, productKey(product.Code), &Product{
+				DocType:      DocProduct,
+				Code:         product.Code,
+				Name:         product.Name,
+				ExpiryDate:   expiry,
+				Price:        roundMoney(product.Price),
+				Quantity:     product.Quantity,
+				MerchantId:   merchant.MerchantId,
+				MerchantType: merchant.Type,
+			}); err != nil {
+				return nil, err
+			}
+			merchant.Products = append(merchant.Products, product.Code)
+			report.Products++
+		}
+
+		if err := writeState(ctx, key, merchant); err != nil {
 			return nil, err
 		}
 		report.Merchants++
-
-		for _, product := range initialProducts[input.MerchantId] {
-			if _, err := c.AddProduct(ctx, input.MerchantId, product.Code, product.Name,
-				product.ExpiryDate, product.Price, product.Quantity); err != nil {
-				return nil, err
-			}
-			report.Products++
-		}
 	}
 
+	// Customers reference nothing, so the public API is safe here.
 	for _, input := range initialCustomers {
 		exists, err := stateExists(ctx, customerKey(input.CustomerId))
 		if err != nil {

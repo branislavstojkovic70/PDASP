@@ -93,6 +93,10 @@ func errInvalidJSON(what string, err error) error {
 	return fmt.Errorf("invalid JSON for %s: %w", what, err)
 }
 
+func errDuplicateInBatch(what, id string) error {
+	return fmt.Errorf("%s '%s' appears more than once in the same request", what, id)
+}
+
 func errInvertedRange(from, to float64) error {
 	return fmt.Errorf("lower bound of the range (%.2f) is greater than the upper bound (%.2f)", from, to)
 }

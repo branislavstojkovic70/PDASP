@@ -84,8 +84,17 @@ func (c *TradeContract) AddProducts(
 		return nil, err
 	}
 
+	// Duplicates within one request have to be caught here: GetState never sees
+	// writes made earlier in the same transaction, so the stateExists check in
+	// buildProduct cannot detect them.
+	seen := map[string]bool{}
 	added := make([]*Product, 0, len(inputs))
 	for _, input := range inputs {
+		if seen[input.Code] {
+			return nil, errDuplicateInBatch("product", input.Code)
+		}
+		seen[input.Code] = true
+
 		product, err := buildProduct(ctx, merchant, input)
 		if err != nil {
 			return nil, err

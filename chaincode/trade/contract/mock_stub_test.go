@@ -31,14 +31,42 @@ type mockStub struct {
 	state map[string][]byte
 	txID  string
 	now   time.Time
+
+	// fabricReadSemantics models the fact that inside a real transaction GetState
+	// sees committed state only and never the writes made earlier in the same
+	// transaction. With it enabled, writes go to pending until commitTx is called.
+	//
+	// It is off by default because most tests treat one contract call as one
+	// transaction and immediately read the result back, which on a real network
+	// would be a second transaction against already committed state. It is turned
+	// on for the tests that specifically check a function does not read back its
+	// own writes.
+	fabricReadSemantics bool
+	pending             map[string][]byte
+	pendingDeletes      map[string]bool
 }
 
 func newStub() *mockStub {
 	return &mockStub{
-		state: map[string][]byte{},
-		txID:  "tx-0001",
-		now:   time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC),
+		state:          map[string][]byte{},
+		pending:        map[string][]byte{},
+		pendingDeletes: map[string]bool{},
+		txID:           "tx-0001",
+		now:            time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC),
 	}
+}
+
+// commitTx merges the pending write set into committed state, the way a peer does
+// once a transaction is validated. Only meaningful with fabricReadSemantics on.
+func (s *mockStub) commitTx() {
+	for key, value := range s.pending {
+		s.state[key] = value
+	}
+	for key := range s.pendingDeletes {
+		delete(s.state, key)
+	}
+	s.pending = map[string][]byte{}
+	s.pendingDeletes = map[string]bool{}
 }
 
 // newContext builds a transaction context over a fresh mock stub.
@@ -56,11 +84,21 @@ func (s *mockStub) GetState(key string) ([]byte, error) {
 func (s *mockStub) PutState(key string, value []byte) error {
 	stored := make([]byte, len(value))
 	copy(stored, value)
+	if s.fabricReadSemantics {
+		s.pending[key] = stored
+		delete(s.pendingDeletes, key)
+		return nil
+	}
 	s.state[key] = stored
 	return nil
 }
 
 func (s *mockStub) DelState(key string) error {
+	if s.fabricReadSemantics {
+		s.pendingDeletes[key] = true
+		delete(s.pending, key)
+		return nil
+	}
 	delete(s.state, key)
 	return nil
 }
