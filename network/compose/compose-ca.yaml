@@ -1,0 +1,112 @@
+# Fabric CA servers: one per peer organization plus one for the orderer org.
+#
+# Each CA is configured through FABRIC_CA_SERVER_* variables. On first start the
+# server generates its own fabric-ca-server-config.yaml, a self signed root
+# certificate and a TLS certificate inside the mounted home directory.
+#
+# CSR_HOSTS must list both the container name (for calls from inside the docker
+# network) and localhost (for fabric-ca-client calls from the host), otherwise TLS
+# hostname verification fails.
+#
+# The bootstrap identity is admin:adminpw and is used by scripts/register-enroll.sh
+# to register peers, orderers and users.
+
+networks:
+  pdasp:
+    name: ${DOCKER_NETWORK}
+
+# Shared by all four CA servers.
+x-ca-common: &ca-common
+  image: hyperledger/fabric-ca:${CA_IMAGE_TAG}
+  labels:
+    pdasp.role: fabric-ca
+  command: sh -c 'fabric-ca-server start -b admin:adminpw -d'
+  networks:
+    - pdasp
+  # The fabric-ca image ships neither curl nor wget, so the healthcheck uses
+  # fabric-ca-client itself. The $$ escape stops docker compose from resolving the
+  # variable on the host: it is read from the container environment instead, which
+  # makes one healthcheck definition work for every CA.
+  healthcheck:
+    test:
+      - CMD-SHELL
+      - >-
+        FABRIC_CA_CLIENT_HOME=/tmp/healthcheck
+        fabric-ca-client getcainfo
+        -u https://localhost:$$FABRIC_CA_SERVER_PORT
+        --tls.certfiles $$FABRIC_CA_HOME/tls-cert.pem
+    interval: 3s
+    timeout: 5s
+    retries: 30
+    start_period: 5s
+
+x-ca-environment: &ca-environment
+  FABRIC_CA_HOME: /etc/hyperledger/fabric-ca-server
+  FABRIC_CA_SERVER_TLS_ENABLED: "true"
+  FABRIC_CA_SERVER_DEBUG: "false"
+
+services:
+
+  ca.org1.pdasp.com:
+    <<: *ca-common
+    container_name: ca.org1.pdasp.com
+    environment:
+      <<: *ca-environment
+      FABRIC_CA_SERVER_CA_NAME: ca-org1
+      FABRIC_CA_SERVER_PORT: "${CA_ORG1_PORT}"
+      FABRIC_CA_SERVER_CSR_CN: ca.org1.pdasp.com
+      FABRIC_CA_SERVER_CSR_HOSTS: ca.org1.pdasp.com,localhost,127.0.0.1,0.0.0.0
+      FABRIC_CA_SERVER_OPERATIONS_LISTENADDRESS: 0.0.0.0:${CA_ORG1_OPS_PORT}
+    ports:
+      - "${CA_ORG1_PORT}:${CA_ORG1_PORT}"
+      - "${CA_ORG1_OPS_PORT}:${CA_ORG1_OPS_PORT}"
+    volumes:
+      - ../organizations/fabric-ca/org1:/etc/hyperledger/fabric-ca-server
+
+  ca.org2.pdasp.com:
+    <<: *ca-common
+    container_name: ca.org2.pdasp.com
+    environment:
+      <<: *ca-environment
+      FABRIC_CA_SERVER_CA_NAME: ca-org2
+      FABRIC_CA_SERVER_PORT: "${CA_ORG2_PORT}"
+      FABRIC_CA_SERVER_CSR_CN: ca.org2.pdasp.com
+      FABRIC_CA_SERVER_CSR_HOSTS: ca.org2.pdasp.com,localhost,127.0.0.1,0.0.0.0
+      FABRIC_CA_SERVER_OPERATIONS_LISTENADDRESS: 0.0.0.0:${CA_ORG2_OPS_PORT}
+    ports:
+      - "${CA_ORG2_PORT}:${CA_ORG2_PORT}"
+      - "${CA_ORG2_OPS_PORT}:${CA_ORG2_OPS_PORT}"
+    volumes:
+      - ../organizations/fabric-ca/org2:/etc/hyperledger/fabric-ca-server
+
+  ca.org3.pdasp.com:
+    <<: *ca-common
+    container_name: ca.org3.pdasp.com
+    environment:
+      <<: *ca-environment
+      FABRIC_CA_SERVER_CA_NAME: ca-org3
+      FABRIC_CA_SERVER_PORT: "${CA_ORG3_PORT}"
+      FABRIC_CA_SERVER_CSR_CN: ca.org3.pdasp.com
+      FABRIC_CA_SERVER_CSR_HOSTS: ca.org3.pdasp.com,localhost,127.0.0.1,0.0.0.0
+      FABRIC_CA_SERVER_OPERATIONS_LISTENADDRESS: 0.0.0.0:${CA_ORG3_OPS_PORT}
+    ports:
+      - "${CA_ORG3_PORT}:${CA_ORG3_PORT}"
+      - "${CA_ORG3_OPS_PORT}:${CA_ORG3_OPS_PORT}"
+    volumes:
+      - ../organizations/fabric-ca/org3:/etc/hyperledger/fabric-ca-server
+
+  ca.orderer.pdasp.com:
+    <<: *ca-common
+    container_name: ca.orderer.pdasp.com
+    environment:
+      <<: *ca-environment
+      FABRIC_CA_SERVER_CA_NAME: ca-orderer
+      FABRIC_CA_SERVER_PORT: "${CA_ORDERER_PORT}"
+      FABRIC_CA_SERVER_CSR_CN: ca.orderer.pdasp.com
+      FABRIC_CA_SERVER_CSR_HOSTS: ca.orderer.pdasp.com,localhost,127.0.0.1,0.0.0.0
+      FABRIC_CA_SERVER_OPERATIONS_LISTENADDRESS: 0.0.0.0:${CA_ORDERER_OPS_PORT}
+    ports:
+      - "${CA_ORDERER_PORT}:${CA_ORDERER_PORT}"
+      - "${CA_ORDERER_OPS_PORT}:${CA_ORDERER_OPS_PORT}"
+    volumes:
+      - ../organizations/fabric-ca/orderer:/etc/hyperledger/fabric-ca-server
