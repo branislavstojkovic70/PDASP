@@ -14,6 +14,11 @@ TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${TEST_DIR}/.." && pwd)"
 APP="${REPO_ROOT}/application/src/index.js"
 
+# Scratch directory for the JSON fixtures the bulk commands are fed with. The
+# files are written and deleted inside a single test, so the directory itself is
+# never committed and has to be created here.
+mkdir -p "${TEST_DIR}/fixtures"
+
 # Every run uses ids derived from the clock, so the suite can be run repeatedly
 # against the same ledger without colliding with its own earlier records.
 RUN_ID="${RUN_ID:-$(date +%H%M%S)}"
