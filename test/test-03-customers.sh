@@ -6,8 +6,6 @@
 require_tools; require_identities
 suite "03  Customers"
 
-# Customers are registered by the Org2 identity, the organization that stands for
-# buyers in the mapping described in ARCHITECTURE.md.
 ORG=org2; USER_ID=org2user1
 
 step "the initial state holds several customers"

@@ -6,11 +6,7 @@ import (
 	"github.com/hyperledger/fabric-contract-api-go/v2/contractapi"
 )
 
-// CreateMerchant stores a new merchant.
-//
-// The type must exist in the catalogue (see merchant_type.go). Without that check
-// merchants with arbitrary types would leak into the world state and searching
-// products by merchant type would return incomplete results.
+
 func (c *TradeContract) CreateMerchant(
 	ctx contractapi.TransactionContextInterface,
 	merchantId string, name string, merchantType string, taxId string, openingBalance float64,
@@ -65,7 +61,6 @@ func (c *TradeContract) CreateMerchant(
 	return merchant, nil
 }
 
-// MerchantInput is one element of the JSON array accepted by CreateMerchants.
 type MerchantInput struct {
 	MerchantId     string  `json:"merchantId"`
 	Name           string  `json:"name"`
@@ -74,10 +69,7 @@ type MerchantInput struct {
 	OpeningBalance float64 `json:"openingBalance"`
 }
 
-// CreateMerchants stores several merchants at once from a JSON array.
-//
-// The whole call is one transaction: if any merchant fails validation none of them
-// is stored. That avoids partial state, which cannot be undone.
+
 func (c *TradeContract) CreateMerchants(
 	ctx contractapi.TransactionContextInterface, merchantsJSON string,
 ) ([]*Merchant, error) {
@@ -95,10 +87,6 @@ func (c *TradeContract) CreateMerchants(
 		return nil, errEmptyParameter("merchantsJSON (empty array)")
 	}
 
-	// Duplicates within one request have to be caught here. GetState inside a
-	// transaction reads committed state only and never sees writes made earlier in
-	// the same transaction, so the stateExists check in CreateMerchant cannot see
-	// a merchant this very call already wrote.
 	seen := map[string]bool{}
 	created := make([]*Merchant, 0, len(inputs))
 	for _, input := range inputs {
@@ -117,7 +105,6 @@ func (c *TradeContract) CreateMerchants(
 	return created, nil
 }
 
-// ReadMerchant returns a single merchant by identifier.
 func (c *TradeContract) ReadMerchant(
 	ctx contractapi.TransactionContextInterface, merchantId string,
 ) (*Merchant, error) {
@@ -128,19 +115,12 @@ func (c *TradeContract) ReadMerchant(
 	return loadMerchant(ctx, merchantId)
 }
 
-// GetAllMerchants returns every merchant, walking the key range.
 func (c *TradeContract) GetAllMerchants(
 	ctx contractapi.TransactionContextInterface,
 ) ([]*Merchant, error) {
 	return readByPrefix[Merchant](ctx, prefixMerchant)
 }
 
-// ChangeMerchantType changes a merchant's line of business and propagates the
-// change to all of its products.
-//
-// The propagation is the price of denormalizing merchantType onto Product (see
-// model.go): without it the products would keep the old type and searching by
-// merchant type would return wrong results.
 func (c *TradeContract) ChangeMerchantType(
 	ctx contractapi.TransactionContextInterface, merchantId string, newType string,
 ) (*Merchant, error) {
@@ -173,7 +153,7 @@ func (c *TradeContract) ChangeMerchantType(
 			return nil, err
 		}
 		if !found {
-			continue // the product sold out and was deleted in the meantime
+			continue 
 		}
 		product.MerchantType = newType
 		if err := writeState(ctx, productKey(code), product); err != nil {

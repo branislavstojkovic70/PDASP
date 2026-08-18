@@ -6,11 +6,6 @@ import (
 	"github.com/hyperledger/fabric-contract-api-go/v2/contractapi"
 )
 
-// AddProduct adds a single product to a merchant's offering.
-//
-// The product is stored as a standalone document (key PRODUCT_<code>) and the
-// merchant only remembers the code. The merchantType field is copied from the
-// merchant so that searching by merchant type stays a single CouchDB selector.
 func (c *TradeContract) AddProduct(
 	ctx contractapi.TransactionContextInterface,
 	merchantId string, code string, name string, expiryDate string,
@@ -44,7 +39,6 @@ func (c *TradeContract) AddProduct(
 	return product, nil
 }
 
-// ProductInput is one element of the JSON array accepted by AddProducts.
 type ProductInput struct {
 	Code       string  `json:"code"`
 	Name       string  `json:"name"`
@@ -53,10 +47,7 @@ type ProductInput struct {
 	Quantity   int     `json:"quantity"`
 }
 
-// AddProducts adds several products to the same merchant from a JSON array.
-//
-// The merchant document is read and written once rather than once per product:
-// within a single transaction every write would overwrite the previous one anyway.
+
 func (c *TradeContract) AddProducts(
 	ctx contractapi.TransactionContextInterface,
 	merchantId string, productsJSON string,
@@ -84,9 +75,7 @@ func (c *TradeContract) AddProducts(
 		return nil, err
 	}
 
-	// Duplicates within one request have to be caught here: GetState never sees
-	// writes made earlier in the same transaction, so the stateExists check in
-	// buildProduct cannot detect them.
+
 	seen := map[string]bool{}
 	added := make([]*Product, 0, len(inputs))
 	for _, input := range inputs {
@@ -109,7 +98,6 @@ func (c *TradeContract) AddProducts(
 	return added, nil
 }
 
-// ReadProduct returns a single product by code.
 func (c *TradeContract) ReadProduct(
 	ctx contractapi.TransactionContextInterface, code string,
 ) (*Product, error) {
@@ -120,14 +108,12 @@ func (c *TradeContract) ReadProduct(
 	return loadProduct(ctx, code)
 }
 
-// GetAllProducts returns every product, walking the key range.
 func (c *TradeContract) GetAllProducts(
 	ctx contractapi.TransactionContextInterface,
 ) ([]*Product, error) {
 	return readByPrefix[Product](ctx, prefixProduct)
 }
 
-// UpdatePrice changes the price of an existing product.
 func (c *TradeContract) UpdatePrice(
 	ctx contractapi.TransactionContextInterface, code string, newPrice float64,
 ) (*Product, error) {
@@ -151,7 +137,6 @@ func (c *TradeContract) UpdatePrice(
 	return product, nil
 }
 
-// RestockProduct increases the stock of a product.
 func (c *TradeContract) RestockProduct(
 	ctx contractapi.TransactionContextInterface, code string, additionalQuantity int,
 ) (*Product, error) {
@@ -175,9 +160,6 @@ func (c *TradeContract) RestockProduct(
 	return product, nil
 }
 
-// buildProduct validates the input and writes the product document. It does not
-// touch the merchant's product list; the caller does that, so a bulk insert writes
-// the merchant only once.
 func buildProduct(
 	ctx contractapi.TransactionContextInterface, merchant *Merchant, input ProductInput,
 ) (*Product, error) {

@@ -6,7 +6,6 @@ import (
 	"github.com/hyperledger/fabric-contract-api-go/v2/contractapi"
 )
 
-// CreateCustomer stores a new customer.
 func (c *TradeContract) CreateCustomer(
 	ctx contractapi.TransactionContextInterface,
 	customerId string, firstName string, lastName string, email string, openingBalance float64,
@@ -56,7 +55,6 @@ func (c *TradeContract) CreateCustomer(
 	return customer, nil
 }
 
-// CustomerInput is one element of the JSON array accepted by CreateCustomers.
 type CustomerInput struct {
 	CustomerId     string  `json:"customerId"`
 	FirstName      string  `json:"firstName"`
@@ -65,8 +63,7 @@ type CustomerInput struct {
 	OpeningBalance float64 `json:"openingBalance"`
 }
 
-// CreateCustomers stores several customers at once from a JSON array.
-// As with merchants, it is all or nothing.
+
 func (c *TradeContract) CreateCustomers(
 	ctx contractapi.TransactionContextInterface, customersJSON string,
 ) ([]*Customer, error) {
@@ -84,9 +81,6 @@ func (c *TradeContract) CreateCustomers(
 		return nil, errEmptyParameter("customersJSON (empty array)")
 	}
 
-	// Duplicates within one request have to be caught here: GetState never sees
-	// writes made earlier in the same transaction, so the stateExists check in
-	// CreateCustomer cannot detect them.
 	seen := map[string]bool{}
 	created := make([]*Customer, 0, len(inputs))
 	for _, input := range inputs {
@@ -105,7 +99,6 @@ func (c *TradeContract) CreateCustomers(
 	return created, nil
 }
 
-// ReadCustomer returns a single customer by identifier.
 func (c *TradeContract) ReadCustomer(
 	ctx contractapi.TransactionContextInterface, customerId string,
 ) (*Customer, error) {
@@ -116,7 +109,6 @@ func (c *TradeContract) ReadCustomer(
 	return loadCustomer(ctx, customerId)
 }
 
-// GetAllCustomers returns every customer, walking the key range.
 func (c *TradeContract) GetAllCustomers(
 	ctx contractapi.TransactionContextInterface,
 ) ([]*Customer, error) {

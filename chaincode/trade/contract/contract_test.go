@@ -5,9 +5,6 @@ import (
 	"testing"
 )
 
-// ---------------------------------------------------------------------------
-// Initialization
-// ---------------------------------------------------------------------------
 
 func TestInitLedgerWritesInitialState(t *testing.T) {
 	ctx, _, tradeContract := seededLedger(t)
@@ -16,7 +13,6 @@ func TestInitLedgerWritesInitialState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second InitLedger failed: %v", err)
 	}
-	// The second call must not write anything, everything already exists.
 	if report.Merchants != 0 || report.Customers != 0 || report.MerchantTypes != 0 {
 		t.Errorf("second InitLedger wrote new records: %+v", report)
 	}
@@ -29,7 +25,6 @@ func TestInitLedgerWritesInitialState(t *testing.T) {
 		t.Errorf("expected 4 merchants, got %d", len(merchants))
 	}
 
-	// The assignment requires at least 2 merchants with at least 2 products each.
 	for _, merchant := range merchants {
 		if len(merchant.Products) < 2 {
 			t.Errorf("merchant %s has only %d products, the minimum is 2",
@@ -54,12 +49,6 @@ func TestInitLedgerWritesInitialState(t *testing.T) {
 	}
 }
 
-// TestInitLedgerUnderFabricReadSemantics guards against a real failure this suite
-// once missed: inside a transaction GetState sees committed state only, never the
-// writes made earlier in the same transaction. An InitLedger that created a
-// merchant type and then went through CreateMerchant, which reads that type back
-// to validate it, failed on the live network with "merchant type 'SUPERMARKET' is
-// not in the catalogue" even though every unit test passed.
 func TestInitLedgerUnderFabricReadSemantics(t *testing.T) {
 	ctx, stub := newContext()
 	stub.fabricReadSemantics = true
@@ -74,7 +63,6 @@ func TestInitLedgerUnderFabricReadSemantics(t *testing.T) {
 		t.Errorf("unexpected report: %+v", report)
 	}
 
-	// After the transaction commits the data must be complete and consistent.
 	stub.commitTx()
 	merchant, err := tradeContract.ReadMerchant(ctx, "M001")
 	if err != nil {
@@ -93,9 +81,7 @@ func TestInitLedgerUnderFabricReadSemantics(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Creating entities
-// ---------------------------------------------------------------------------
+
 
 func TestCreateMerchantRejectsDuplicate(t *testing.T) {
 	ctx, _, tradeContract := seededLedger(t)
@@ -147,7 +133,6 @@ func TestCreateMerchantRejectsEmptyParameters(t *testing.T) {
 func TestCreateCustomersIsAllOrNothing(t *testing.T) {
 	ctx, _, tradeContract := seededLedger(t)
 
-	// The second customer has an invalid email, so neither may be stored.
 	input := `[
 		{"customerId":"C900","firstName":"New","lastName":"Customer","email":"new@example.com","openingBalance":100},
 		{"customerId":"C901","firstName":"Second","lastName":"Customer","email":"no-at-sign","openingBalance":100}
@@ -156,8 +141,6 @@ func TestCreateCustomersIsAllOrNothing(t *testing.T) {
 		t.Fatal("expected an invalid email error, got nil")
 	}
 
-	// C901 never reached the state. Fabric discards the whole transaction proposal
-	// when chaincode returns an error, so nothing is written to the ledger.
 	if _, err := tradeContract.ReadCustomer(ctx, "C901"); err == nil {
 		t.Error("C901 must not exist")
 	}
@@ -165,8 +148,6 @@ func TestCreateCustomersIsAllOrNothing(t *testing.T) {
 
 func TestBulkCreateRejectsDuplicatesWithinOneRequest(t *testing.T) {
 	ctx, stub, tradeContract := seededLedger(t)
-	// Duplicate detection must not rely on reading back what this same
-	// transaction wrote, so the test runs with real Fabric read semantics.
 	stub.fabricReadSemantics = true
 
 	_, err := tradeContract.CreateCustomers(ctx, `[
@@ -217,7 +198,6 @@ func TestAddProductsUpdatesMerchantOnce(t *testing.T) {
 		t.Errorf("new codes were not recorded on the merchant: %v", merchant.Products)
 	}
 
-	// The merchant type must be copied onto the product (denormalization).
 	if added[0].MerchantType != "SUPERMARKET" {
 		t.Errorf("merchantType was not denormalized: %q", added[0].MerchantType)
 	}
@@ -240,10 +220,6 @@ func TestAddProductRejectsInvalidExpiryDate(t *testing.T) {
 		t.Fatalf("expected a date format error, got: %v", err)
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Purchase
-// ---------------------------------------------------------------------------
 
 func TestBuyProductSucceeds(t *testing.T) {
 	ctx, _, tradeContract := seededLedger(t)
@@ -274,7 +250,6 @@ func TestBuyProductSucceeds(t *testing.T) {
 			productBefore.Quantity-3, result.RemainingQuantity)
 	}
 
-	// The invoice must be linked to both participants.
 	customerAfter, _ := tradeContract.ReadCustomer(ctx, "C001")
 	merchantAfter, _ := tradeContract.ReadMerchant(ctx, "M001")
 	if !contains(customerAfter.Invoices, result.Invoice.Id) {
@@ -284,7 +259,6 @@ func TestBuyProductSucceeds(t *testing.T) {
 		t.Error("invoice was not added to the merchant")
 	}
 
-	// The date must come from the mock stub TxTimestamp, not the machine clock.
 	if result.Invoice.Date != "2026-03-01T12:00:00Z" {
 		t.Errorf("date did not come from TxTimestamp: %q", result.Invoice.Date)
 	}
@@ -330,9 +304,6 @@ func TestBuyProductRejectsInsufficientStock(t *testing.T) {
 
 func TestBuyProductDeletesProductWhenStockHitsZero(t *testing.T) {
 	ctx, _, tradeContract := seededLedger(t)
-
-	// P012 (laptop) has 8 units; C003 has 150000 while the laptop costs 89900, so
-	// the price is lowered to make buying all 8 units affordable.
 	if _, err := tradeContract.UpdatePrice(ctx, "P012", 100); err != nil {
 		t.Fatalf("UpdatePrice: %v", err)
 	}
@@ -354,7 +325,6 @@ func TestBuyProductDeletesProductWhenStockHitsZero(t *testing.T) {
 		t.Errorf("code remained in the merchant offering: %v", merchant.Products)
 	}
 
-	// The invoice must still carry the name and price of the deleted product.
 	invoice, err := tradeContract.ReadInvoice(ctx, result.Invoice.Id)
 	if err != nil {
 		t.Fatalf("ReadInvoice: %v", err)
@@ -367,7 +337,6 @@ func TestBuyProductDeletesProductWhenStockHitsZero(t *testing.T) {
 func TestBuyProductRejectsProductOfAnotherMerchant(t *testing.T) {
 	ctx, _, tradeContract := seededLedger(t)
 
-	// P001 belongs to M001, not M002.
 	_, err := tradeContract.BuyProduct(ctx, "C001", "M002", "P001", 1)
 	if err == nil {
 		t.Fatal("expected an error, got nil")
@@ -414,10 +383,6 @@ func TestBuyProductRejectsNonPositiveQuantity(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Deposit
-// ---------------------------------------------------------------------------
-
 func TestDeposit(t *testing.T) {
 	ctx, _, tradeContract := seededLedger(t)
 
@@ -455,14 +420,9 @@ func TestDepositRejectsInvalidInput(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Searches (CouchDB rich queries)
-// ---------------------------------------------------------------------------
-
 func TestSearchByNameIsCaseInsensitive(t *testing.T) {
 	ctx, _, tradeContract := seededLedger(t)
 
-	// "Milk 2.8% 1L" (supermarket) and "Baby milk formula 400g" (pharmacy).
 	products, err := tradeContract.SearchProductsByName(ctx, "MILK")
 	if err != nil {
 		t.Fatalf("SearchProductsByName: %v", err)
@@ -479,7 +439,6 @@ func TestSearchByMerchantType(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SearchProductsByMerchantType: %v", err)
 	}
-	// Without an explicit sortByPrice the result is ordered by code.
 	if joined(productCodes(products)) != "P005,P006,P007" {
 		t.Errorf("expected P005,P006,P007 (sorted by code), got %v", productCodes(products))
 	}
@@ -513,10 +472,6 @@ func TestSearchByPriceRejectsInvertedRange(t *testing.T) {
 
 func TestCombinedSearch(t *testing.T) {
 	ctx, _, tradeContract := seededLedger(t)
-
-	// Name contains "milk", merchant type is supermarket or pharmacy, price
-	// 1000-2000. Only P010 (1590.00) qualifies: P001 costs 129.99 and would
-	// otherwise match, so the lower bound gives the price filter something to cut.
 	criteria := `{
 		"name":"milk",
 		"merchantTypes":["SUPERMARKET","PHARMACY"],
@@ -532,7 +487,6 @@ func TestCombinedSearch(t *testing.T) {
 		t.Errorf("expected P010, got %v", productCodes(products))
 	}
 
-	// Without the price filter both must come back.
 	products, err = tradeContract.SearchProducts(ctx,
 		`{"name":"milk","merchantTypes":["SUPERMARKET","PHARMACY"],"sortByPrice":"asc"}`)
 	if err != nil {
@@ -588,8 +542,7 @@ func TestProductsExpiringBefore(t *testing.T) {
 		t.Fatalf("ProductsExpiringBefore: %v", err)
 	}
 
-	// P002 (2026-08-20), P004 (2026-09-05) and P001 (2026-09-30). Products without
-	// an expiry date (P005, P006, P011, P012, P013) must NOT appear.
+
 	if joined(productCodes(products)) != "P002,P001,P004" {
 		t.Errorf("expected P002,P001,P004 (ascending by price), got %v", productCodes(products))
 	}
@@ -648,9 +601,6 @@ func TestPagedSearch(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Invoices
-// ---------------------------------------------------------------------------
 
 func TestCustomerAndMerchantInvoices(t *testing.T) {
 	ctx, stub, tradeContract := seededLedger(t)
@@ -658,8 +608,7 @@ func TestCustomerAndMerchantInvoices(t *testing.T) {
 	if _, err := tradeContract.BuyProduct(ctx, "C001", "M001", "P001", 2); err != nil {
 		t.Fatalf("first purchase: %v", err)
 	}
-	// Every transaction has its own TxID; without changing it the second invoice
-	// would overwrite the first.
+
 	stub.txID = "tx-0002"
 	if _, err := tradeContract.BuyProduct(ctx, "C001", "M001", "P003", 1); err != nil {
 		t.Fatalf("second purchase: %v", err)
@@ -681,7 +630,6 @@ func TestCustomerAndMerchantInvoices(t *testing.T) {
 		t.Errorf("expected 2 invoices for the merchant, got %d", len(invoices))
 	}
 
-	// Amount filter: 2 x 129.99 = 259.98, while the coffee costs 389.00.
 	expensive, err := tradeContract.CustomerInvoicesAbove(ctx, "C001", 300)
 	if err != nil {
 		t.Fatalf("CustomerInvoicesAbove: %v", err)
@@ -698,10 +646,6 @@ func TestReadInvoiceForUnknownId(t *testing.T) {
 		t.Error("expected an error for an unknown invoice")
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Changing a merchant type
-// ---------------------------------------------------------------------------
 
 func TestChangeMerchantTypePropagatesToProducts(t *testing.T) {
 	ctx, _, tradeContract := seededLedger(t)
@@ -720,7 +664,6 @@ func TestChangeMerchantTypePropagatesToProducts(t *testing.T) {
 		}
 	}
 
-	// Searching by the new type must find them.
 	matched, err := tradeContract.SearchProductsByMerchantType(ctx, "CONSTRUCTION")
 	if err != nil {
 		t.Fatalf("SearchProductsByMerchantType: %v", err)
@@ -733,10 +676,6 @@ func TestChangeMerchantTypePropagatesToProducts(t *testing.T) {
 		t.Error("a change to an unknown type passed without an error")
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 func TestRoundMoney(t *testing.T) {
 	cases := []struct {
@@ -761,7 +700,6 @@ func TestPrefixRange(t *testing.T) {
 		t.Errorf("prefixRange returned (%q, %q)", from, to)
 	}
 
-	// The bounds must cover every prefixed key and nothing else.
 	if !("MERCHANT_M001" >= from && "MERCHANT_M001" < to) {
 		t.Error("a prefixed key falls outside the range")
 	}

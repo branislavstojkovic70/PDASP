@@ -1,12 +1,6 @@
-// Command dispatch for the console application.
-//
-// Loaded by index.js only after process.argv has been stashed away, see the
-// comment there.
-
 import { allCommands, commandGroups, getCommand, parseArgs } from './cli.js';
 import { describeError, printError, printResult } from './output.js';
 
-// Importing a command module registers its commands as a side effect.
 import './commands/identity.js';
 import './commands/invoke.js';
 import './commands/query.js';
@@ -22,8 +16,6 @@ export const EXIT_USAGE = 2;
  * @returns {Promise<number>} process exit code
  */
 export async function run(argv) {
-  // No arguments means the interactive menu. It is imported lazily so that a
-  // single command invocation does not pay for readline or the menu tables.
   if (argv.length === 0) {
     const { runMenu } = await import('./menu.js');
     return runMenu();

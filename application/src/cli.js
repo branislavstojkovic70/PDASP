@@ -45,7 +45,6 @@ export function connectionOptions(flags) {
   return { org, user, channel, peerIndex };
 }
 
-/** Reads a required positional argument or explains what is missing. */
 export function requireArg(positional, index, name, usage) {
   const value = positional[index];
   if (value === undefined || value === '') {
@@ -54,7 +53,6 @@ export function requireArg(positional, index, name, usage) {
   return value;
 }
 
-/** Reads a numeric argument and rejects anything that is not a number. */
 export function requireNumber(value, name) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) {
@@ -72,9 +70,6 @@ export function requireInteger(value, name) {
   return parsed;
 }
 
-// ---------------------------------------------------------------------------
-// Command registry
-// ---------------------------------------------------------------------------
 
 const registry = new Map();
 

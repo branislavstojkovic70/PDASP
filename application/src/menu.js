@@ -1,31 +1,16 @@
-// Interactive menu, shown when the application is started without arguments.
-//
-// The menu is a thin layer over the same commands the command line exposes: it
-// collects the arguments, then calls the registered command. Nothing is
-// implemented twice, so a fix in a command applies to both faces of the
-// application.
-
 import { createInterface } from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
-
 import { CHANNELS, DEFAULT_CHANNEL, DEFAULT_ORG, ORGS } from './config.js';
 import { getCommand } from './cli.js';
 import { describeError, detail, heading, note, printError, printResult, printTable, success } from './output.js';
 import { listIdentities } from './wallet.js';
 
-// The session keeps the identity and channel so they are not retyped every time.
 const session = {
   org: DEFAULT_ORG,
   user: 'org1user1',
   channel: DEFAULT_CHANNEL,
 };
 
-/**
- * Every menu entry names a command and how to gather its arguments.
- *
- * `prompts` are the positional arguments in order. `flags` are collected as named
- * flags. An entry with neither runs the command straight away.
- */
 const ENTRIES = [
   { key: '1', title: 'Enroll or login (choose organization and user)', handler: chooseIdentity },
   { key: '2', title: 'Switch channel', handler: chooseChannel },
@@ -101,16 +86,9 @@ const SEARCH_ENTRIES = [
 let rl;
 let closing;
 
-/** Thrown when stdin ends, so every pending prompt unwinds to runMenu. */
 class InputClosed extends Error {}
 
-/**
- * Asks a question.
- *
- * The abort signal matters: readline's promise never settles once stdin has
- * ended, so without it Ctrl-D or a piped script that runs out of lines leaves
- * node warning about an unsettled top level await instead of exiting.
- */
+
 async function ask(prompt) {
   try {
     return await rl.question(prompt, { signal: closing.signal });
@@ -180,7 +158,6 @@ async function runEntry(entry) {
   const positional = [];
   for (const prompt of entry.prompts ?? []) {
     const answer = (await ask(`  ${prompt}: `)).trim();
-    // A trailing optional argument left empty simply ends the list.
     if (answer === '' && positional.length >= requiredCount(entry)) break;
     positional.push(answer);
   }
@@ -203,13 +180,6 @@ async function runEntry(entry) {
   }
 }
 
-/**
- * How many of an entry's prompts are mandatory.
- *
- * The optional arguments are always the trailing ones, and the command itself
- * reports a missing mandatory argument, so this only decides when an empty answer
- * means "stop asking" rather than "pass an empty string".
- */
 function requiredCount(entry) {
   const optionalTrailing = {
     'create-merchant': 4,

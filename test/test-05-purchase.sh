@@ -6,8 +6,6 @@
 require_tools; require_identities
 suite "05  Purchase"
 
-# The merchant and the products are set up by Org1, the purchase is made by Org2,
-# which is the mapping described in ARCHITECTURE.md.
 ORG=org1; USER_ID=org1admin
 merchant="MS${RUN_ID}"
 product="PS${RUN_ID}"

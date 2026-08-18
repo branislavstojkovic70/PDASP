@@ -15,15 +15,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// A fake ChaincodeStub backed by an in-memory world state.
-//
-// Instead of a mocking library this is a real in-memory ledger with a simplified
-// CouchDB Mango evaluator. The reason: half of the logic under test lives in the
-// selectors assembled by queries.go, and a mock that returns a canned response
-// would never establish whether a selector is correct at all.
-//
-// Only the subset of Mango operators the chaincode actually uses is supported:
-// equality, $regex, $in, $gte, $gt, $lte and $lt.
+
 
 type mockStub struct {
 	shim.ChaincodeStubInterface // the remaining methods are not needed in tests
@@ -31,16 +23,6 @@ type mockStub struct {
 	state map[string][]byte
 	txID  string
 	now   time.Time
-
-	// fabricReadSemantics models the fact that inside a real transaction GetState
-	// sees committed state only and never the writes made earlier in the same
-	// transaction. With it enabled, writes go to pending until commitTx is called.
-	//
-	// It is off by default because most tests treat one contract call as one
-	// transaction and immediately read the result back, which on a real network
-	// would be a second transaction against already committed state. It is turned
-	// on for the tests that specifically check a function does not read back its
-	// own writes.
 	fabricReadSemantics bool
 	pending             map[string][]byte
 	pendingDeletes      map[string]bool
@@ -56,8 +38,7 @@ func newStub() *mockStub {
 	}
 }
 
-// commitTx merges the pending write set into committed state, the way a peer does
-// once a transaction is validated. Only meaningful with fabricReadSemantics on.
+
 func (s *mockStub) commitTx() {
 	for key, value := range s.pending {
 		s.state[key] = value
@@ -69,7 +50,6 @@ func (s *mockStub) commitTx() {
 	s.pendingDeletes = map[string]bool{}
 }
 
-// newContext builds a transaction context over a fresh mock stub.
 func newContext() (contractapi.TransactionContextInterface, *mockStub) {
 	stub := newStub()
 	ctx := new(contractapi.TransactionContext)
@@ -206,9 +186,7 @@ func (i *mockIterator) Next() (*queryresult.KV, error) {
 
 func (i *mockIterator) Close() error { return nil }
 
-// ---------------------------------------------------------------------------
-// Simplified Mango evaluator
-// ---------------------------------------------------------------------------
+
 
 func matchesSelector(document, selector map[string]any) bool {
 	for field, condition := range selector {
@@ -299,11 +277,6 @@ func applyComparison[T float64 | string](operator string, left, right T) bool {
 	return false
 }
 
-// ---------------------------------------------------------------------------
-// Test helpers
-// ---------------------------------------------------------------------------
-
-// seededLedger sets up the initial state and returns a context over it.
 func seededLedger(t interface{ Fatalf(string, ...any) }) (contractapi.TransactionContextInterface, *mockStub, *TradeContract) {
 	ctx, stub := newContext()
 	tradeContract := new(TradeContract)
@@ -313,7 +286,6 @@ func seededLedger(t interface{ Fatalf(string, ...any) }) (contractapi.Transactio
 	return ctx, stub, tradeContract
 }
 
-// productCodes extracts the codes from a search result for easier comparison.
 func productCodes(products []*Product) []string {
 	codes := make([]string, 0, len(products))
 	for _, product := range products {

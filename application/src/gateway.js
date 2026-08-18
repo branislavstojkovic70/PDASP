@@ -75,7 +75,6 @@ function decode(bytes) {
   }
 }
 
-/** Opens a connection, runs the callback and always closes the connection. */
 export async function withGateway(options, callback) {
   const connection = openGateway(options);
   try {
