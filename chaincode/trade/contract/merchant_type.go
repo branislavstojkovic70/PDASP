@@ -2,13 +2,7 @@ package contract
 
 import "github.com/hyperledger/fabric-contract-api-go/v2/contractapi"
 
-// Catalogue of merchant types.
-//
-// The assignment requires merchant types to be kept as state on the blockchain
-// rather than as an enum in code, so they are a separate entity with their own key
-// and creating a merchant checks that its type exists in the catalogue.
 
-// CreateMerchantType adds a new line of business to the catalogue.
 func (c *TradeContract) CreateMerchantType(
 	ctx contractapi.TransactionContextInterface,
 	code string, name string, description string,

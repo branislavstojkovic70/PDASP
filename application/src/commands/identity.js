@@ -1,5 +1,3 @@
-// Commands for the enroll and login half of the assignment.
-
 import { X509Certificate } from 'node:crypto';
 
 import { ORGS, requireOrg } from '../config.js';
@@ -120,12 +118,7 @@ registerCommand({
   },
 });
 
-/**
- * Extracts the subject of a PEM certificate for the whoami output.
- *
- * The OU in that subject is what NodeOUs uses to decide whether the identity is a
- * client, a peer or an admin, so it is the single most useful thing to show.
- */
+
 function subjectOf(certificatePem) {
   try {
     return new X509Certificate(certificatePem).subject.replace(/\n/g, ', ');

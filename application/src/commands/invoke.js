@@ -1,9 +1,3 @@
-// State changing commands: everything that submits a transaction to the ledger.
-//
-// Each command maps one to one onto a chaincode function. Arguments are
-// positional because these are typed by hand in the interactive menu and by the
-// shell test scripts, where a long chain of flags would only obscure the call.
-
 import { readFileSync } from 'node:fs';
 
 import { invoke, withGateway } from '../gateway.js';
@@ -13,18 +7,12 @@ import {
 
 const GROUP = 'Invoke (changes the ledger)';
 
-/** Submits a transaction and returns the parsed result. */
 function submit(flags, functionName, args) {
   return withGateway(connectionOptions(flags), (connection) =>
     invoke(connection, functionName, args));
 }
 
-/**
- * Reads a JSON array either from --file or from the first positional argument.
- *
- * A file is the practical route: a JSON array with quotes and braces is painful
- * to pass through a shell, and the test scripts keep their fixtures next to them.
- */
+
 function readJsonArray(positional, flags, name) {
   const raw = flags.file
     ? readFileSync(String(flags.file), 'utf8')
@@ -43,14 +31,9 @@ function readJsonArray(positional, flags, name) {
   if (!Array.isArray(parsed)) {
     throw new Error(`${name} must be a JSON array, got ${typeof parsed}`);
   }
-  // Passed on as a string: chaincode takes the whole array as one argument and
-  // parses it itself, which keeps validation of the contents in one place.
   return JSON.stringify(parsed);
 }
 
-// ---------------------------------------------------------------------------
-// Merchant types
-// ---------------------------------------------------------------------------
 
 registerCommand({
   name: 'create-merchant-type',
@@ -64,9 +47,6 @@ registerCommand({
   },
 });
 
-// ---------------------------------------------------------------------------
-// Merchants
-// ---------------------------------------------------------------------------
 
 registerCommand({
   name: 'create-merchant',
@@ -107,9 +87,6 @@ registerCommand({
   },
 });
 
-// ---------------------------------------------------------------------------
-// Customers
-// ---------------------------------------------------------------------------
 
 registerCommand({
   name: 'create-customer',
@@ -137,9 +114,6 @@ registerCommand({
   },
 });
 
-// ---------------------------------------------------------------------------
-// Products
-// ---------------------------------------------------------------------------
 
 registerCommand({
   name: 'add-product',
@@ -199,9 +173,6 @@ registerCommand({
   },
 });
 
-// ---------------------------------------------------------------------------
-// Trading
-// ---------------------------------------------------------------------------
 
 registerCommand({
   name: 'buy',
@@ -234,9 +205,6 @@ registerCommand({
   },
 });
 
-// ---------------------------------------------------------------------------
-// Initialization
-// ---------------------------------------------------------------------------
 
 registerCommand({
   name: 'init-ledger',

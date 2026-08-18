@@ -1,18 +1,5 @@
-// Command line parsing and the command registry.
-//
-// The application has two faces. Started without arguments it shows an
-// interactive menu; started with a command it runs exactly that command and
-// exits, which is what the shell test scripts need.
-
 import { DEFAULT_CHANNEL, DEFAULT_ORG, DEFAULT_USER, requireChannel, requireOrg } from './config.js';
 
-/**
- * Parses argv into a command name, positional arguments and flags.
- *
- * Supports --flag value, --flag=value and boolean --flag. There is no dependency
- * on a parser library: the flag set is small and fixed, and a hand written parser
- * keeps the error messages in the same voice as the rest of the application.
- */
 export function parseArgs(argv) {
   const positional = [];
   const flags = {};
@@ -44,12 +31,7 @@ export function parseArgs(argv) {
   return { command: positional.shift(), positional, flags };
 }
 
-/**
- * Resolves the connection flags shared by every command that talks to the ledger.
- *
- * Defaults come from config.js so a bare `node src/index.js merchants` works
- * against org1 on channel1 without ceremony.
- */
+
 export function connectionOptions(flags) {
   const org = requireOrg(String(flags.org ?? DEFAULT_ORG));
   const user = String(flags.user ?? DEFAULT_USER);

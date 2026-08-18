@@ -1,9 +1,3 @@
-// Read only commands: everything that evaluates a chaincode function.
-//
-// These use evaluateTransaction, which asks a single peer and never reaches the
-// orderer. That is the right mode for searches and it is also the only mode in
-// which Fabric permits the paginated CouchDB query.
-
 import { query, withGateway } from '../gateway.js';
 import { connectionOptions, registerCommand, requireArg, requireInteger, requireNumber } from '../cli.js';
 
@@ -14,7 +8,6 @@ function evaluate(flags, functionName, args) {
     query(connection, functionName, args));
 }
 
-/** Registers a query command that takes no positional arguments. */
 function registerSimpleQuery({ name, usage, summary, functionName }) {
   registerCommand({
     name,
@@ -27,7 +20,6 @@ function registerSimpleQuery({ name, usage, summary, functionName }) {
   });
 }
 
-/** Registers a query command that takes exactly one positional argument. */
 function registerLookup({ name, usage, summary, functionName, argumentName }) {
   registerCommand({
     name,
@@ -41,9 +33,6 @@ function registerLookup({ name, usage, summary, functionName, argumentName }) {
   });
 }
 
-// ---------------------------------------------------------------------------
-// Listing whole collections
-// ---------------------------------------------------------------------------
 
 registerSimpleQuery({
   name: 'merchant-types',
@@ -117,9 +106,6 @@ registerLookup({
   argumentName: 'invoiceId',
 });
 
-// ---------------------------------------------------------------------------
-// Product searches, the assignment requirement
-// ---------------------------------------------------------------------------
 
 registerLookup({
   name: 'search-name',
@@ -174,12 +160,6 @@ registerLookup({
   argumentName: 'date',
 });
 
-/**
- * Builds the combined search criteria from flags.
- *
- * Only the flags that were actually given end up in the object, because the
- * chaincode distinguishes an absent filter from a filter set to zero.
- */
 function buildCriteria(flags) {
   const criteria = {};
 
@@ -227,10 +207,6 @@ registerCommand({
       [JSON.stringify(buildCriteria(flags)), pageSize, bookmark]);
   },
 });
-
-// ---------------------------------------------------------------------------
-// Invoices
-// ---------------------------------------------------------------------------
 
 registerCommand({
   name: 'invoices',

@@ -7,11 +7,6 @@ import (
 	"github.com/hyperledger/fabric-contract-api-go/v2/contractapi"
 )
 
-// PurchaseResult is the outcome of a successful purchase.
-//
-// It carries the new balances and the remaining quantity so the console
-// application does not need extra queries just to show the effect of the
-// transaction.
 type PurchaseResult struct {
 	Invoice           *Invoice `json:"invoice"`
 	CustomerBalance   float64  `json:"customerBalance"`
@@ -20,15 +15,6 @@ type PurchaseResult struct {
 	ProductRemoved    bool     `json:"productRemoved"`
 }
 
-// BuyProduct performs a purchase of a product from a merchant.
-//
-// The order is deliberate: every check runs before the first write. A transaction
-// cannot be rolled back, so a half applied purchase (money taken but no goods
-// reserved) would stay in the ledger forever.
-//
-// When the quantity reaches zero the product is deleted from the world state and
-// from the merchant's offering, as the assignment requires. The invoice remains
-// readable because it carries a snapshot of the name, unit price and quantity.
 func (c *TradeContract) BuyProduct(
 	ctx contractapi.TransactionContextInterface,
 	customerId string, merchantId string, productCode string, quantity int,
@@ -64,10 +50,6 @@ func (c *TradeContract) BuyProduct(
 		return nil, err
 	}
 
-	// --- business checks -----------------------------------------------------
-	// The product exists but may belong to a different merchant. Both the field on
-	// the product and the merchant's offering are checked, because those are two
-	// records that could in principle drift apart.
 	if product.MerchantId != merchantId || !contains(merchant.Products, productCode) {
 		return nil, errProductNotSoldByMerchant(productCode, merchantId)
 	}
@@ -80,10 +62,6 @@ func (c *TradeContract) BuyProduct(
 		return nil, errInsufficientFunds(customerId, customer.Balance, total)
 	}
 
-	// --- create the invoice --------------------------------------------------
-	// The id and the date must be identical on every endorser, otherwise the
-	// read-write sets diverge and endorsement fails. Hence TxID and TxTimestamp,
-	// never uuid.New() or time.Now().
 	date, err := transactionTime(ctx)
 	if err != nil {
 		return nil, err
@@ -101,7 +79,6 @@ func (c *TradeContract) BuyProduct(
 		Date:        date,
 	}
 
-	// --- apply the changes ---------------------------------------------------
 	customer.Balance = roundMoney(customer.Balance - total)
 	merchant.Balance = roundMoney(merchant.Balance + total)
 	customer.Invoices = append(customer.Invoices, invoice.Id)
@@ -137,7 +114,6 @@ func (c *TradeContract) BuyProduct(
 	}, nil
 }
 
-// DepositResult is the outcome of a deposit.
 type DepositResult struct {
 	EntityType string  `json:"entityType"`
 	Id         string  `json:"id"`
@@ -146,11 +122,6 @@ type DepositResult struct {
 	NewBalance float64 `json:"newBalance"`
 }
 
-// Deposit increases the balance of a merchant or a customer.
-//
-// entityType is "merchant" or "customer". One function rather than two, because
-// the logic is identical and the console application asks who is being credited
-// anyway.
 func (c *TradeContract) Deposit(
 	ctx contractapi.TransactionContextInterface,
 	entityType string, id string, amount float64,
@@ -203,7 +174,6 @@ func (c *TradeContract) Deposit(
 	return result, nil
 }
 
-// ReadInvoice returns a single invoice by identifier.
 func (c *TradeContract) ReadInvoice(
 	ctx contractapi.TransactionContextInterface, id string,
 ) (*Invoice, error) {
@@ -221,10 +191,6 @@ func (c *TradeContract) ReadInvoice(
 	return invoice, nil
 }
 
-// transactionTime returns the transaction time in RFC3339 form.
-//
-// It comes from the transaction proposal rather than the node clock: every
-// endorser must compute exactly the same result.
 func transactionTime(ctx contractapi.TransactionContextInterface) (string, error) {
 	stamp, err := ctx.GetStub().GetTxTimestamp()
 	if err != nil {

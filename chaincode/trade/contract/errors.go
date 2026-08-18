@@ -2,14 +2,6 @@ package contract
 
 import "fmt"
 
-// Chaincode errors are always returned as plain error values, never as a panic.
-// A panic crashes the chaincode container and the peer reports a generic message,
-// leaving the console application with no information about what went wrong.
-//
-// Messages always name the concrete identifier, because the console application
-// shows them to the user verbatim.
-
-// ---------------------------------------------------------------- not found
 
 func errMerchantNotFound(id string) error {
 	return fmt.Errorf("merchant with id '%s' does not exist", id)
@@ -31,7 +23,6 @@ func errMerchantTypeNotFound(code string) error {
 	return fmt.Errorf("merchant type '%s' is not in the catalogue", code)
 }
 
-// ---------------------------------------------------------------- already exists
 
 func errMerchantExists(id string) error {
 	return fmt.Errorf("merchant with id '%s' already exists", id)
@@ -49,7 +40,6 @@ func errMerchantTypeExists(code string) error {
 	return fmt.Errorf("merchant type '%s' is already in the catalogue", code)
 }
 
-// ---------------------------------------------------------------- business rules
 
 func errInsufficientFunds(customerId string, balance, required float64) error {
 	return fmt.Errorf(
@@ -71,7 +61,6 @@ func errUnknownEntityType(entityType string) error {
 	return fmt.Errorf("unknown entity type '%s': expected 'merchant' or 'customer'", entityType)
 }
 
-// ---------------------------------------------------------------- validation
 
 func errEmptyParameter(name string) error {
 	return fmt.Errorf("parameter '%s' is required and must not be empty", name)
@@ -105,7 +94,6 @@ func errSearchTermTooLong(length, allowed int) error {
 	return fmt.Errorf("search term is too long: %d characters, the limit is %d", length, allowed)
 }
 
-// ---------------------------------------------------------------- infrastructure
 
 func errRead(key string, err error) error {
 	return fmt.Errorf("reading key '%s' from the world state failed: %w", key, err)

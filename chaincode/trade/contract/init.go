@@ -2,19 +2,6 @@ package contract
 
 import "github.com/hyperledger/fabric-contract-api-go/v2/contractapi"
 
-// Initial world state.
-//
-// The assignment asks for at least 2 merchants with at least 2 products each plus
-// a few customers. There are 4 and 13 here, with deliberately varied data because
-// the CouchDB rich queries are demonstrated against it:
-//
-//   - "Milk 2.8% 1L" (supermarket) and "Baby milk formula 400g" (pharmacy) share a
-//     term in the name across two merchant types, so a query combining
-//     $regex "milk" with $in ["SUPERMARKET","PHARMACY"] returns both
-//   - prices span 69.50 to 89900.00, so a price range has something to cut
-//   - some products have an expiry date and some do not, for the date range query
-//   - customer C004 deliberately has very little money, giving the insufficient
-//     funds test a stable case
 
 var initialMerchantTypes = []MerchantType{
 	{Code: "SUPERMARKET", Name: "Supermarket", Description: "Groceries and everyday goods"},
@@ -62,7 +49,6 @@ var initialCustomers = []CustomerInput{
 	{CustomerId: "C004", FirstName: "Jelena", LastName: "Jelic", Email: "jelena.jelic@example.com", OpeningBalance: 300},
 }
 
-// InitReport summarises what the initialization wrote.
 type InitReport struct {
 	MerchantTypes   int `json:"merchantTypes"`
 	Merchants       int `json:"merchants"`
@@ -71,23 +57,7 @@ type InitReport struct {
 	SkippedExisting int `json:"skippedExisting"`
 }
 
-// InitLedger sets up the initial world state.
-//
-// It is called as a normal invoke transaction after the chaincode definition is
-// committed. Existing records are skipped rather than failing the whole call, so
-// InitLedger can safely be run again, for example after a chaincode upgrade on the
-// same channel.
-//
-// The merchants and products are written directly rather than through
-// CreateMerchant and AddProduct. Those two read state back (the merchant type
-// catalogue and the merchant document) to validate their input, and inside a
-// single transaction GetState only ever sees committed state: writes made earlier
-// in the same transaction are invisible to it. Going through the public API would
-// therefore fail with "merchant type 'SUPERMARKET' is not in the catalogue" for a
-// type this very call had just written.
-//
-// The data below is a compile time table, so its internal consistency is checked
-// against that table instead of against the ledger.
+
 func (c *TradeContract) InitLedger(
 	ctx contractapi.TransactionContextInterface,
 ) (*InitReport, error) {
@@ -172,7 +142,6 @@ func (c *TradeContract) InitLedger(
 		report.Merchants++
 	}
 
-	// Customers reference nothing, so the public API is safe here.
 	for _, input := range initialCustomers {
 		exists, err := stateExists(ctx, customerKey(input.CustomerId))
 		if err != nil {
